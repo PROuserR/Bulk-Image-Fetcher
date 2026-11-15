@@ -1,0 +1,8 @@
+{
+  "name": "Remix FullRes Image Scraper \u0026 Flask Studio",
+  "description": "Extract full-size source images from any webpage with intelligent CDN un-shrinking, high-res lightbox inspector, batch download, zip export, and full Python Flask project exporter.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
