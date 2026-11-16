@@ -156,3 +156,141 @@ export async function fetchImageWithRefererFallback(
 
   return response;
 }
+
+/**
+ * Validates that a downloaded payload is non-empty binary image data rather than an HTML/JSON error page.
+ */
+export function isValidImageBuffer(
+  buf: Buffer,
+  contentType = 'image/jpeg',
+  minBytes = 1
+): boolean {
+  if (buf.byteLength < minBytes) return false;
+  const lowerType = contentType.toLowerCase();
+  if (lowerType.includes('text/html') || lowerType.includes('application/json')) {
+    return false;
+  }
+  const headStr = buf.subarray(0, 32).toString('ascii').toLowerCase();
+  if (headStr.includes('<!doc') || headStr.includes('<html')) {
+    return false;
+  }
+  return true;
+}
+
+export async function fetchValidImageBuffer(
+  targetUrl: string,
+  options: {
+    explicitReferer?: string;
+    relayUrl?: string;
+    timeoutMs?: number;
+    minBytes?: number;
+    fetcher?: (url: string, referer: string, timeoutMs: number) => Promise<globalThis.Response>;
+  } = {}
+): Promise<{ buf: Buffer; contentType: string } | null> {
+  if (!targetUrl) return null;
+  const {
+    explicitReferer,
+    relayUrl = '',
+    timeoutMs = 8500,
+    minBytes = 1,
+    fetcher = fetchImageWithRefererFallback,
+  } = options;
+  const referer = resolveImageReferer(targetUrl, explicitReferer);
+  const fetchTarget = relayUrl ? buildRelayTarget(targetUrl, relayUrl) : targetUrl;
+  try {
+    const resp = await fetcher(fetchTarget, referer, timeoutMs);
+    if (!resp.ok) return null;
+    const contentType = resp.headers.get('content-type') || 'application/octet-stream';
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (!isValidImageBuffer(buf, contentType, minBytes)) return null;
+    return { buf, contentType };
+  } catch {
+    return null;
+  }
+}
+
+export interface ImageBufferFallbackParams {
+  imageUrl: string;
+  explicitReferer?: string;
+  relayUrl?: string;
+  fallbackUrl?: string;
+  linkedPageUrl?: string;
+  minBytes?: number;
+  allowFallbackUrl?: boolean;
+  resolveDetailPageUrl?: (detailUrl: string) => Promise<string | null>;
+  fetcher?: (url: string, referer: string, timeoutMs: number) => Promise<globalThis.Response>;
+}
+
+/**
+ * Fetches an image buffer with ordered fallbacks: primary URL -> linked detail page -> fallbackUrl -> ImageFap mirror.
+ */
+export async function resolveImageBufferWithFallbacks(
+  params: ImageBufferFallbackParams
+): Promise<{ buf: Buffer; contentType: string } | null> {
+  const {
+    imageUrl,
+    explicitReferer,
+    relayUrl = '',
+    fallbackUrl = '',
+    linkedPageUrl = '',
+    minBytes = 1,
+    allowFallbackUrl = true,
+    resolveDetailPageUrl,
+    fetcher,
+  } = params;
+
+  let result = await fetchValidImageBuffer(imageUrl, {
+    explicitReferer,
+    relayUrl,
+    timeoutMs: 8500,
+    minBytes,
+    fetcher,
+  });
+
+  if (!result && linkedPageUrl && resolveDetailPageUrl) {
+    try {
+      const resolvedUrl = await resolveDetailPageUrl(
+        relayUrl ? buildRelayTarget(linkedPageUrl, relayUrl) : linkedPageUrl
+      );
+      if (resolvedUrl && resolvedUrl !== imageUrl) {
+        result = await fetchValidImageBuffer(resolvedUrl, {
+          explicitReferer,
+          relayUrl,
+          timeoutMs: 8000,
+          minBytes,
+          fetcher,
+        });
+      }
+    } catch {
+      // ignore detail page fallback failure
+    }
+  }
+
+  if (!result && allowFallbackUrl && fallbackUrl && fallbackUrl !== imageUrl) {
+    result = await fetchValidImageBuffer(fallbackUrl, {
+      explicitReferer,
+      relayUrl,
+      timeoutMs: 6000,
+      minBytes,
+      fetcher,
+    });
+  }
+
+  if (!result && /imagefap/i.test(imageUrl)) {
+    const idMatch =
+      (imageUrl.match(/\/([0-9]{8,12})\.(?:jpg|jpeg)/i) || [])[1] ||
+      (linkedPageUrl.match(/\/photo\/([0-9]{8,12})/i) || [])[1];
+    if (idMatch && IFAP_MIRROR_FALLBACKS[idMatch]) {
+      result = await fetchValidImageBuffer(IFAP_MIRROR_FALLBACKS[idMatch], {
+        explicitReferer,
+        relayUrl: '',
+        timeoutMs: 6000,
+        minBytes,
+        fetcher,
+      });
+    }
+  }
+
+  return result;
+}
+

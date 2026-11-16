@@ -1,164 +1,185 @@
-# FullRes Image Scraper & Studio
+# FullRes Studio — High-Resolution Image Scraper & Batch Darkroom
 
-A full-stack web application and Python Flask toolkit that extracts **original, uncropped master images** from webpages, image galleries, linked photo detail pages, and Instagram profiles—bypassing compressed thumbnails, responsive `srcset` caps, and CDN resize restrictions.
+> **Stop downloading 480px thumbnails when the 4K master is hiding behind a URL parameter.**
+
+**FullRes Studio** is a full-stack **Next.js 16 (App Router)**, **Tailwind CSS v4**, and **TypeScript** workstation built for developers, archivists, and creative engineers. It extracts original uncropped master images from arbitrary webpages, linked photo detail galleries, and Instagram profiles—then lets you inspect, filter, batch crop, resize, and export them locally using HTML5 Canvas or native **`sharp`**.
 
 ---
 
-## Features
+## Why FullRes Exists
 
-- **Intelligent Full-Resolution Unshrinking**
-  - **Instagram Profiles** (`instagram.com/<username>/` or `@username`): Extracts HD profile avatars, single posts, and all multi-photo carousel slides via paginated API & SSR extraction, plus optional `sessionid` cookie support and a 1-click browser DevTools **Instagram Profile Harvester** script.
-  - **Linked Detail Page Crawler**: Automatically follows `/photo/<id>/`, `/item/`, and gallery detail subpages to resolve live signed master CDN URLs (e.g., `/images/full/...`) and JSON-LD `contentUrl` entries.
-  - **CDN & CMS Normalization**: Unshrinks WordPress (`-300x200.jpg`), Wikimedia Commons (`/thumb/`), Unsplash (`w=`/`crop`), Cloudinary, Shopify (`_master`), Flickr, Pinterest (`/originals/`), Blogger/Google (`/s0/`), YouTube (`maxresdefault.jpg`), and generic `<picture>` / `srcset` / lazy-load (`data-original`, `data-full`) attributes.
-  - **Geo-Block & Paste Fallbacks**: Includes an **Open-Tab Console Harvester** script, optional CORS/Relay worker URL input, and a **Paste Previews / HTML / JSON** drawer that accepts preview URL batches, raw page HTML, Instagram `web_profile_info` / `feed/user` JSON, or Harvester JSON manifests.
+Modern websites rarely link directly to the file on the camera roll. Instead, galleries serve cropped `srcset` previews, WordPress `-300x200` derivatives, CDN width-capped URLs (`?w=640`, `/thumb/`, `s640x640`), or paginated JSON feeds behind TLS fingerprinting.
 
-- **Stackable High-Level Filter Workbench**
-  - Stack boolean AND rules across the gallery and exporter modal: **Full Masters Only**, **Previewable / No Blanks** (filters broken/404/1x1 tracking pixels), **Un-shrunk**, **HD / 4K (≥1920px)**, **Has Subpage**, **Hide Icons / GIFs**, **Format**, **Resolution Tier**, **Orientation**, and live text search.
-  - Includes a 1-click **Clean Masters Preset** and **Select Full Masters** bulk action.
+FullRes reverses those layers in a single pipeline:
 
-- **Multi-Format Link Harvester & Batch ZIP Downloads**
-  - **Full Image Links Harvester** modal with **Direct Master Links (CDN)**, **Master Webpage Links**, **Interactive Table**, **JSON**, and **CSV** tabs.
-  - Fast server-side ZIP bundling (`POST /api/download-zip` with `STORE` compression) plus automatic browser-side `JSZip` fallback assembly and direct single-file downloads.
-  - Built-in CORS image proxy (`/api/proxy`), standalone high-res viewer (`/view-image`), persistent Dark/Light theme, and a **Flask Codebase** exporter (`flask_app/`).
+```text
+  URL / HTML / Instagram / Local Folder
+                 │
+                 ▼
+  ┌──────────────────────────────────────────────────────────┐
+  │ 1. Extraction & Unshrinking                              │
+  │    • Cheerio DOM + JSON-LD + srcset/data-* heuristics    │
+  │    • Linked detail-page crawler & CDN pattern rewriter   │
+  │    • 3-tier Instagram scraper (TLS/SSR/Playwright)       │
+  └──────────────┬───────────────────────────┬───────────────┘
+                 │                           │
+                 ▼                           ▼
+  ┌──────────────────────────┐ ┌─────────────────────────────┐
+  │ 2. Contact-Sheet Studio  │ │ 3. Crop & Resize Darkroom   │
+  │ • Stackable AND filters  │ │ • 8-handle live crop canvas │
+  │ • Live blank/1x1 probing │ │ • Aspect & print presets    │
+  │ • Progressive disk save  │ │ • Browser Canvas / sharp    │
+  └──────────────┬───────────┘ └─────────────┬───────────────┘
+                 │                           │
+                 ▼                           ▼
+        Direct Disk / ZIP          Processed Folder / ZIP
+```
+
+---
+
+## Key Capabilities
+
+### 1. Intelligent Full-Resolution Scraping
+- **CDN & CMS Un-shrinking**: Normalizes URL patterns across **WordPress** (`-300x200.jpg`), **Wikimedia Commons** (`/thumb/`), **Unsplash** (`w=` / `crop`), **Cloudinary**, **Shopify** (`_master`), **Flickr**, **Pinterest** (`/originals/`), **Blogger / Google** (`/s0/`), **YouTube** (`maxresdefault.jpg`), and generic `<picture>` / `srcset` / lazy-load (`data-original`, `data-full`) attributes.
+- **Linked Detail Page Crawler**: Follows `/photo/<id>/`, `/item/`, and gallery detail subpages to extract signed master CDN URLs and Schema.org `contentUrl` fields.
+- **3-Tier Instagram Profile Pipeline** (`instagram.com/<user>/` or `@user`):
+  1. **TLS-Fingerprinted HTTP (`got-scraping`)**: Paginates GraphQL & REST feeds while extracting HD profile avatars, single posts, and every slide inside multi-photo carousels.
+  2. **SSR Hydration Parser**: Extracts embedded `xdt_api__v1__feed__user_timeline_graphql_connection` payloads from initial HTML.
+  3. **Headless Browser Fallback (`playwright-core`)**: Intercepts live profile feeds when strict login walls or anti-bot challenges block HTTP requests, with optional in-memory `sessionid` cookie support and a **DevTools Open-Tab Harvester**.
+- **Geo-Block & Paste Fallbacks**: Supports custom CORS/Relay worker URLs plus a **Paste Previews / HTML / JSON** drawer accepting preview URL batches, raw HTML, Instagram JSON dumps, or Harvester manifests.
+
+### 2. Stackable Contact-Sheet Workbench
+- **Composable AND Filters**: Combine **Full Masters Only**, **Previewable / No Blanks** (probes for 404s and `1×1` tracking pixels), **Un-shrunk**, **HD / 4K (`≥1920px`)**, **Has Subpage**, **Hide Icons / GIFs**, **Format**, **Resolution Tier**, **Orientation**, and instant text search.
+- **Multi-Format Link Harvester**: Inspect and export **Direct Master Links (CDN)**, **Master Webpage Links**, **Interactive Table**, **JSON**, and **CSV**.
+- **Resilient Downloads**: Streams server-side `STORE`-compressed ZIP bundles (`/api/download-zip`), falls back seamlessly to browser `JSZip`, or writes straight to a chosen local directory via the File System Access API (`progressiveDownloader`).
+
+### 3. Batch Directory Crop & Resize Darkroom
+- **Two Processing Backends**:
+  - **Browser Folder / Scraped Batch**: Drop a local folder (`webkitdirectory`), select individual files, load built-in test plates, or send filtered results directly from the Scraper Gallery (`Crop / Resize (N)`). Processed losslessly in-browser via HTML5 Canvas.
+  - **Server Disk Directory Mode**: Scan an absolute filesystem path (`/api/crop-resize/scan-dir`) and batch-process hundreds of files via native C++ **`sharp`** (`/api/crop-resize/process-dir`), writing directly to a target subfolder or streaming a ZIP (`/api/crop-resize/download-zip`).
+- **Interactive 8-Handle Crop Canvas**: Drag corners, edges, or reposition the selection box with rule-of-thirds guides and aspect-ratio locks (`Free`, `Original`, `1:1`, `4:5`, `16:9`, `3:2`, `4:3`, `9:16`).
+- **Flexible Resize Modes**: Supports `Original`, `Width × Height`, `Fit Max Edge`, and `Percentage Scale` with `Cover`, `Contain`, `Fill`, and `Inside` strategies across `JPEG`, `PNG`, `WebP`, and `AVIF`.
 
 ---
 
 ## Tech Stack
 
-- **Frontend**: React 19, TypeScript, Tailwind CSS v4, Lucide Icons, JSZip
-- **Backend (Primary Full-Stack)**: Node.js, Express 4, Cheerio, Vite 8
-- **Optional Python Sibling**: Flask, BeautifulSoup4, Requests, Gunicorn (`flask_app/`)
-- **Testing & Quality**: `node:test` via `tsx --test`, TypeScript (`tsc --noEmit`)
+| Layer | Technologies |
+| :--- | :--- |
+| **Framework & UI** | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4, Lucide Icons |
+| **Image & Archive Engine** | `sharp` (server native), HTML5 Canvas (client), `jszip` (streaming & browser ZIPs) |
+| **Scraping & Networking** | `cheerio`, `got-scraping`, `tough-cookie`, `p-limit`, `playwright-core` |
+| **Testing** | Node.js built-in test runner (`node:test`) via `tsx --test` (**68 unit tests**) |
 
 ---
 
-## Project Structure
+## Architecture & Directory Map
 
 ```text
-├── server.ts                          # Express + Vite dev/prod unified server entry point
-├── package.json
-├── index.html
-├── .env.example                       # Sample environment variables (copy to .env if needed)
+├── next.config.ts                       # Next.js 16 configuration & remote image optimization
+├── postcss.config.mjs                   # Tailwind CSS v4 PostCSS setup
+├── .env.example                         # Optional APP_URL and CHROMIUM_PATH config
 ├── src/
-│   ├── App.tsx                        # Main studio shell, state, toast & download orchestrators
+│   ├── App.tsx                          # Root studio shell, theme state, scrape & download orchestrators
+│   ├── app/                             # Next.js 16 App Router pages & REST Route Handlers
+│   │   ├── layout.tsx                   # Root HTML shell, Space Grotesk / Inter / JetBrains Mono fonts
+│   │   ├── globals.css                  # Tailwind v4 entry & theme tokens
+│   │   ├── page.tsx                     # Home Studio route
+│   │   ├── view-image/route.ts          # Standalone full-res image inspector page
+│   │   ├── download-all/route.ts        # Legacy bulk download route
+│   │   └── api/
+│   │       ├── scrape/route.ts          # Main webpage, detail-crawler & Instagram scrape endpoint
+│   │       ├── instagram/profile/       # Dedicated paginated Instagram profile endpoint
+│   │       ├── deep-resolve/route.ts    # Single linked detail-page master resolver
+│   │       ├── links/route.ts           # JSON / CSV / TXT link exporter
+│   │       ├── proxy/route.ts           # CORS-bypass image proxy with smart Referer headers
+│   │       ├── download-file/route.ts   # Single master attachment streamer
+│   │       ├── download-zip/route.ts    # In-memory STORE ZIP packager
+│   │       ├── export-full-project/     # Downloads the full Next.js 16 codebase as a ZIP
+│   │       └── crop-resize/             # Disk directory scan, preview, sharp batch & ZIP endpoints
 │   ├── components/
-│   │   ├── Header.tsx                 # Top navigation bar, theme toggle & Flask ZIP export
-│   │   ├── ScraperControls.tsx        # URL form, Instagram Profile panel, Bypass & Paste drawers
-│   │   ├── FilterStackBar.tsx         # Shared stackable filter chips component
-│   │   ├── GalleryView.tsx            # Filterable grid, preview probing & batch selection toolbar
-│   │   ├── FullImageLinksModal.tsx    # CDN / Webpage / Table / JSON / CSV exporter modal
-│   │   ├── LightboxModal.tsx          # Zoomable high-res inspector with preview comparison
-│   │   ├── FlaskCodeViewer.tsx        # In-app Python Flask source viewer
-│   │   └── DeploymentDocs.tsx         # Setup & API reference tab
+│   │   ├── Header.tsx                   # Studio navigation bar, Dark/Light theme & project ZIP export
+│   │   ├── ScraperControls.tsx          # Target URL bar, Instagram Profile panel, Relay & Paste drawers
+│   │   ├── FilterStackBar.tsx           # Composable boolean AND filter rule bar
+│   │   ├── GalleryView.tsx              # Contact-sheet grid, broken/1x1 probing & batch selection
+│   │   ├── CropResizeStudio.tsx         # Batch darkroom workspace, folder intake & queue manager
+│   │   ├── CropResizeInspector.tsx      # 4-section Crop, Resize, Naming & Export inspector rail
+│   │   ├── InteractiveCropCanvas.tsx    # Pointer-driven 8-handle crop overlay with thirds grid
+│   │   ├── FullImageLinksModal.tsx      # Multi-tab link inspector & CSV/JSON exporter modal
+│   │   ├── LightboxModal.tsx            # Zoomable high-res inspector with before/after preview
+│   │   ├── ProgressiveDownloadBar.tsx   # Parallel stream & disk-write progress HUD
+│   │   └── DeploymentDocs.tsx           # In-app API reference & 1-click codebase ZIP tab
 │   ├── server/
-│   │   ├── fetchHelpers.ts            # Relay builder, referer resolver, filename sanitizer & fetch retry
-│   │   ├── fetchHelpers.test.ts       # Unit tests for server helpers
-│   │   ├── instagramService.ts        # Paginated Instagram profile scraper service
-│   │   └── viewImageTemplate.ts       # Standalone /view-image HTML renderer
+│   │   ├── fetchHelpers.ts              # Relay builder, Referer rules & fallback image buffer resolver
+│   │   ├── scrapeRouteHelpers.ts        # Shared detail-link predicates, fallback presets & ZIP tree walker
+│   │   ├── instagramService.ts          # 3-tier paginated Instagram profile & Playwright service
+│   │   ├── directoryImageService.ts     # Path-safe disk scanning & sharp crop/resize pipeline
+│   │   └── viewImageTemplate.ts         # Standalone /view-image HTML template generator
 │   └── utils/
-│       ├── scraperLogic.ts            # CDN unshrinker, resolution classifier & filter engine
-│       ├── scraperLogic.test.ts       # Unit tests for unshrinking & filtering logic
-│       ├── htmlExtractor.ts           # Cheerio HTML/JSON-LD/manifest parser
-│       ├── htmlExtractor.test.ts      # Unit tests for HTML & manifest parsing
-│       ├── instagramExtractor.ts      # Instagram GraphQL / REST v1 / SSR JSON parser
-│       ├── instagramExtractor.test.ts # Unit tests for Instagram profile & carousel parsing
-│       ├── harvesterScripts.ts        # Browser DevTools console harvester snippets
-│       ├── downloader.ts              # Native disk save & viewer URL helpers
-│       └── samplePages.ts             # Offline showcase presets
-└── flask_app/                         # Self-contained Python Flask alternative + Dockerfile
-    ├── app.py
-    ├── scraper.py
-    ├── config.py
-    ├── wsgi.py
-    ├── requirements.txt
-    ├── Dockerfile
-    ├── templates/
-    └── static/
+│       ├── scraperLogic.ts              # CDN unshrinker, resolution classifier & filter engine
+│       ├── htmlExtractor.ts             # Cheerio DOM, JSON-LD, gallery map & manifest extractor
+│       ├── instagramExtractor.ts        # Instagram GraphQL / REST v1 / SSR JSON parser
+│       ├── imageTransformLogic.ts       # Normalized crop clamping, aspect lock & resize math
+│       ├── browserImageProcessor.ts     # Client HTML5 Canvas crop/resize & test-plate generator
+│       ├── progressiveDownloader.ts     # Parallel fetch queue & File System Access direct saver
+│       ├── harvesterScripts.ts          # Browser DevTools console harvester snippets
+│       ├── safeFetchJson.ts             # Content-type safe JSON response guard
+│       ├── downloader.ts                # Blob download & viewer URL helpers
+│       └── samplePages.ts               # Built-in showcase & parser regression presets
 ```
 
 ---
 
-## Quickstart (Node.js Full-Stack)
+## Getting Started
 
 ### Prerequisites
 - **Node.js 20+** (Node 22+ recommended)
 - **npm 10+**
 
-### 1. Install Dependencies
+### 1. Install & Launch Development Server
 ```bash
-git clone https://github.com/<your-username>/fullres-image-scraper.git
-cd fullres-image-scraper
 npm install
-```
-
-### 2. Run Development Server
-```bash
 npm run dev
 ```
 Open **`http://localhost:3000`** in your browser.
 
-> **Windows Note:** Do not place the repository inside a folder whose path contains an ampersand (`&`, e.g. `foo & bar`), because `cmd.exe` splits unquoted `.bin\tsx.cmd` shim paths at `&`. If your Node.js version is 22.6+, you can also start the server directly with:
-> ```bash
-> node server.ts
-> ```
+*(Optional)* Copy `.env.example` to `.env` if you want to customize `APP_URL` or point `CHROMIUM_PATH` to a specific local Chromium binary for headless Instagram fallbacks.
 
-### 3. Run Tests, Type Check & Production Build
+### 2. Run Unit Tests, Type-Check & Production Build
 ```bash
-npm test          # Runs all unit tests (fetchHelpers, htmlExtractor, instagramExtractor, scraperLogic)
-npm run lint      # Runs TypeScript type checking (tsc --noEmit)
-npm run build     # Builds production frontend bundle into dist/
-```
-
-### 4. Production Start
-```bash
-NODE_ENV=production npm start
-```
-*(On Windows PowerShell: `$env:NODE_ENV="production"; npm start`)*
-
----
-
-## Python Flask Setup (Optional Standalone Backend)
-
-A self-contained Python implementation lives under `flask_app/`:
-
-```bash
-cd flask_app
-python3 -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-python app.py                   # Serves on http://localhost:5000
-```
-
-Or run via Docker:
-```bash
-cd flask_app
-docker build -t fullres-image-scraper:latest .
-docker run -d -p 5000:5000 --name image-scraper fullres-image-scraper:latest
+npm test          # Runs 68 node:test unit tests across utils & server modules
+npm run lint      # Strict TypeScript verification (tsc --noEmit)
+npm run build     # Compiles Next.js 16 App Router production bundles (.next/)
+npm start         # Serves the production build on port 3000
 ```
 
 ---
 
 ## REST API Reference
 
-| Method | Endpoint | Description |
+| Method | Endpoint | Purpose |
 | :--- | :--- | :--- |
-| `POST` | `/api/scrape` | Scrapes a webpage URL, Instagram profile, preview batch, HTML, or Harvester JSON manifest (`{ url, customHtml?, followLinkedPages?, relayUrl?, instagramSession?, maxPosts? }`). |
-| `POST` | `/api/instagram/profile` | Dedicated Instagram profile full-resolution photo & carousel fetcher (`{ profileUrl, sessionCookie?, maxPosts?, relayUrl? }`). |
-| `POST` | `/api/deep-resolve` | Resolves the master image URL from a single linked detail webpage (`{ linkedPageUrl, relayUrl? }`). |
+| `POST` | `/api/scrape` | Scrapes a webpage URL, Instagram profile, preview batch, raw HTML, or JSON manifest. |
+| `POST` | `/api/instagram/profile` | Paginated Instagram profile photo, avatar, and multi-slide carousel extractor. |
+| `POST` | `/api/deep-resolve` | Resolves the master image URL from a single linked detail webpage. |
 | `ALL` | `/api/links` | Exports harvested direct master links and webpage links as `json`, `csv`, or `txt`. |
 | `GET` | `/api/proxy` | CORS-bypass image proxy with smart site `Referer` headers (`?url=...&referer=...`). |
-| `GET` | `/api/download-file` | Streams an individual master image with `Content-Disposition: attachment`. |
-| `POST` | `/api/download-zip` | Packages selected master images into an in-memory `.zip` archive (`STORE` compression). |
-| `GET` | `/view-image` | Renders a dedicated standalone master image inspection page. |
-| `GET` | `/api/export-flask-project` | Downloads `flask_app/` as a standalone `.zip` project. |
+| `GET` | `/api/download-file` | Streams a single master image with fallback resolution (`Content-Disposition: attachment`). |
+| `POST` | `/api/download-zip` | Packages selected master URLs into a fast in-memory `STORE` `.zip` archive. |
+| `POST` | `/api/crop-resize/scan-dir` | Lists supported images & dimensions inside a local server directory (`sharp`). |
+| `GET` | `/api/crop-resize/local-preview` | Serves sanitized local thumbnails for the Crop & Resize workspace. |
+| `POST` | `/api/crop-resize/process-dir` | Batch crops/resizes a local directory with `sharp` and saves outputs to disk. |
+| `POST` | `/api/crop-resize/download-zip` | Streams processed images from a local directory as a `.zip` archive. |
+| `GET` | `/view-image` | Renders the standalone full-resolution image viewer page. |
+| `GET` | `/api/export-full-project` | Packages the entire Next.js 16 source tree as a downloadable `.zip`. |
 
 ---
 
 ## Privacy & Responsible Use
 
-- Do not commit `.env` files, personal Instagram `sessionid` cookies, or downloaded media archives to version control.
-- `sessionid` cookies entered in the UI are used solely in-memory for the active request and are never persisted to disk or logged.
-- Respect target website Terms of Service, copyright laws, and rate limits when scraping media.
+- Never commit `.env` files, personal Instagram `sessionid` cookies, or downloaded media archives.
+- `sessionid` cookies entered in the UI stay strictly in-memory for active requests and are never logged or written to disk.
+- Respect target site Terms of Service, copyright restrictions, and rate limits when extracting media.
 
 ---
 

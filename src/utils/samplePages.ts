@@ -147,7 +147,7 @@ export const SAMPLE_PRESETS: SamplePreset[] = [
     name: 'Artisan Hardware & Scandinavian Goods',
     category: 'E-Commerce / Shopify',
     url: 'https://nordic-craft-supplies.com/collections/ceramics-and-tools',
-    description: 'Shopify product image naming (_medium, _thumb) resolved to master high-resolution originals.',
+    description: 'Product catalog thumbnails paired with data-original, data-zoom-image, and lightbox high-res masters.',
     imageCount: 6,
     html: `<!DOCTYPE html>
 <html>
@@ -158,13 +158,13 @@ export const SAMPLE_PRESETS: SamplePreset[] = [
   <div class="product-grid">
     <div class="product-card">
       <a href="https://images.unsplash.com/photo-1610701596007-11502861dcfa?w=3000&q=95">
-        <img src="https://images.unsplash.com/photo-1610701596007-11502861dcfa_medium.jpg" alt="Artisanal Stoneware Pour-Over Carafe" width="300">
+        <img src="https://images.unsplash.com/photo-1610701596007-11502861dcfa?w=300&fit=crop" alt="Artisanal Stoneware Pour-Over Carafe" width="300">
       </a>
       <h3>Pour-Over Carafe</h3>
     </div>
 
     <div class="product-card">
-      <img src="https://images.unsplash.com/photo-1578749556568-bc2c40e68b61_300x300.jpg" 
+      <img src="https://images.unsplash.com/photo-1578749556568-bc2c40e68b61?w=300&fit=crop" 
            data-original="https://images.unsplash.com/photo-1578749556568-bc2c40e68b61?w=2800&q=95" 
            alt="Hand-Turned Oak Wood Tableware Plate" width="300">
       <h3>Handmade Oak Plate</h3>
@@ -172,13 +172,13 @@ export const SAMPLE_PRESETS: SamplePreset[] = [
 
     <div class="product-card">
       <a href="https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=2600&q=95">
-        <img src="https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f_small.png" alt="Analog Instant Film Camera Body" width="300">
+        <img src="https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=300&fit=crop" alt="Analog Instant Film Camera Body" width="300">
       </a>
       <h3>Analog Film Camera</h3>
     </div>
 
     <div class="product-card">
-      <img src="https://images.unsplash.com/photo-1505740420928-5e560c06d30e_compact.jpg" 
+      <img src="https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=300&fit=crop" 
            data-zoom-image="https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=3200&q=95" 
            alt="Studio Over-Ear Audio Monitor Headphones" width="300">
       <h3>Studio Headphones</h3>
@@ -186,13 +186,13 @@ export const SAMPLE_PRESETS: SamplePreset[] = [
 
     <div class="product-card">
       <a href="https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=2500&q=95">
-        <img src="https://images.unsplash.com/photo-1523275335684-37898b6baf30_thumb.jpg" alt="Minimalist Chronograph Wristwatch White Dial" width="300">
+        <img src="https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&fit=crop" alt="Minimalist Chronograph Wristwatch White Dial" width="300">
       </a>
       <h3>Minimal Chronograph</h3>
     </div>
 
     <div class="product-card">
-      <img src="https://images.unsplash.com/photo-1546868871-7041f2a55e12_grande.jpg" 
+      <img src="https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=300&fit=crop" 
            data-high-res="https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=3000&q=90" 
            alt="Smart Fitness Watch Matte Black" width="300">
       <h3>Fitness Smartwatch</h3>

@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Download,
@@ -19,6 +21,8 @@ import {
   LayoutGrid,
   RectangleHorizontal,
   Search,
+  Crop,
+  Users,
 } from 'lucide-react';
 import {
   ScrapedImage,
@@ -60,6 +64,8 @@ interface GalleryViewProps {
   isLoadingMorePosts?: boolean;
   onLoadMorePosts?: () => void;
   totalProfilePosts?: number;
+  onSendToCropResize?: (targetImages: ScrapedImage[]) => void;
+  onSendToHumanClassifier?: (targetImages: ScrapedImage[]) => void;
 }
 
 interface GalleryCardProps {
@@ -90,8 +96,13 @@ const GalleryCard: React.FC<GalleryCardProps> = ({
         urls.push(u);
       }
     };
-    addCandidate(img.thumbnailUrl);
-    addCandidate(img.fullUrl);
+    if (img.isUnshrunk) {
+      addCandidate(img.fullUrl);
+      addCandidate(img.thumbnailUrl);
+    } else {
+      addCandidate(img.thumbnailUrl);
+      addCandidate(img.fullUrl);
+    }
     addCandidate(img.fallbackUrl);
     const proxyTarget = img.fullUrl || img.thumbnailUrl;
     if (proxyTarget && !isBlankOrPlaceholderUrl(proxyTarget)) {
@@ -99,7 +110,7 @@ const GalleryCard: React.FC<GalleryCardProps> = ({
       if (!urls.includes(proxyUrl)) urls.push(proxyUrl);
     }
     return urls;
-  }, [img.thumbnailUrl, img.fullUrl, img.fallbackUrl, sourceUrl]);
+  }, [img.thumbnailUrl, img.fullUrl, img.fallbackUrl, img.isUnshrunk, sourceUrl]);
 
   const [candidateIdx, setCandidateIdx] = useState<number>(0);
 
@@ -340,6 +351,8 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   isLoadingMorePosts = false,
   onLoadMorePosts,
   totalProfilePosts,
+  onSendToCropResize,
+  onSendToHumanClassifier,
 }) => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filters, setFilters] = useState<GalleryFilterState>(DEFAULT_GALLERY_FILTERS);
@@ -795,6 +808,44 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               Get All Full Links ({activeFilterCount > 0 ? `${filteredImages.length}/${images.length}` : images.length})
             </span>
           </button>
+
+          {onSendToCropResize && (
+            <button
+              type="button"
+              onClick={() => {
+                const targets =
+                  selectedIds.size > 0
+                    ? images.filter((img) => selectedIds.has(img.id))
+                    : filteredImages;
+                if (targets.length > 0) onSendToCropResize(targets);
+              }}
+              disabled={filteredImages.length === 0 && selectedIds.size === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-40"
+              title="Open selected or filtered images inside Crop & Resize Studio"
+            >
+              <Crop className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>Crop / Resize ({selectedIds.size > 0 ? selectedIds.size : filteredImages.length})</span>
+            </button>
+          )}
+
+          {onSendToHumanClassifier && (
+            <button
+              type="button"
+              onClick={() => {
+                const targets =
+                  selectedIds.size > 0
+                    ? images.filter((img) => selectedIds.has(img.id))
+                    : filteredImages;
+                if (targets.length > 0) onSendToHumanClassifier(targets);
+              }}
+              disabled={filteredImages.length === 0 && selectedIds.size === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-40"
+              title="Classify selected or filtered images by human identity with AI"
+            >
+              <Users className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>Classify Humans ({selectedIds.size > 0 ? selectedIds.size : filteredImages.length})</span>
+            </button>
+          )}
 
           <button
             type="button"

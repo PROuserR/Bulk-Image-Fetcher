@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import {
   Search,
@@ -76,16 +78,21 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
   const [copiedHarvester, setCopiedHarvester] = useState(false);
   const [copiedIgHarvester, setCopiedIgHarvester] = useState(false);
 
+  const prevGeoBlockedRef = React.useRef(geoBlocked);
+  const prevIgRequiredRef = React.useRef(instagramLoginRequired);
+
   useEffect(() => {
-    if (geoBlocked) {
+    if (geoBlocked && !prevGeoBlockedRef.current) {
       setMode('harvester');
     }
+    prevGeoBlockedRef.current = geoBlocked;
   }, [geoBlocked]);
 
   useEffect(() => {
-    if (instagramLoginRequired) {
+    if (instagramLoginRequired && !prevIgRequiredRef.current) {
       setMode('instagram');
     }
+    prevIgRequiredRef.current = instagramLoginRequired;
   }, [instagramLoginRequired]);
 
   useEffect(() => {
@@ -94,6 +101,18 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
       onModeHandled?.();
     }
   }, [requestedMode, onModeHandled]);
+
+  const handleModeTabKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    const order: ExtractorMode[] = ['url', 'instagram', 'harvester', 'paste'];
+    const idx = order.indexOf(mode);
+    if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      setMode(order[(idx + 1) % order.length]);
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      setMode(order[(idx - 1 + order.length) % order.length]);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -188,6 +207,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               role="tab"
               aria-selected={mode === 'url'}
               onClick={() => setMode('url')}
+              onKeyDown={handleModeTabKeyDown}
               className={`flex items-center justify-center sm:justify-start gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'url'
                   ? 'bg-white dark:bg-[#1A1D26] text-zinc-950 dark:text-white shadow-xs'
@@ -203,6 +223,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               role="tab"
               aria-selected={mode === 'instagram'}
               onClick={() => setMode('instagram')}
+              onKeyDown={handleModeTabKeyDown}
               className={`flex items-center justify-center sm:justify-start gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'instagram'
                   ? 'bg-white dark:bg-[#1A1D26] text-zinc-950 dark:text-white shadow-xs'
@@ -220,6 +241,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               role="tab"
               aria-selected={mode === 'harvester'}
               onClick={() => setMode('harvester')}
+              onKeyDown={handleModeTabKeyDown}
               className={`flex items-center justify-center sm:justify-start gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'harvester'
                   ? 'bg-white dark:bg-[#1A1D26] text-zinc-950 dark:text-white shadow-xs'
@@ -237,6 +259,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               role="tab"
               aria-selected={mode === 'paste'}
               onClick={() => setMode('paste')}
+              onKeyDown={handleModeTabKeyDown}
               className={`flex items-center justify-center sm:justify-start gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'paste'
                   ? 'bg-white dark:bg-[#1A1D26] text-zinc-950 dark:text-white shadow-xs'
@@ -322,7 +345,10 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
 
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-zinc-500 dark:text-zinc-400 mr-1">Try sample:</span>
-                {SAMPLE_PRESETS.filter((preset) => preset.id !== 'imagefap_gallery').map((preset) => (
+                {SAMPLE_PRESETS.filter(
+                  (preset) =>
+                    preset.id !== 'imagefap_gallery' && preset.id !== 'imagefap_jessie_rogers'
+                ).map((preset) => (
                   <button
                     key={preset.id}
                     type="button"

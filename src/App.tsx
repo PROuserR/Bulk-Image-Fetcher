@@ -1,16 +1,19 @@
+'use client';
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import JSZip from 'jszip';
 import { Header } from './components/Header';
 import { ScraperControls } from './components/ScraperControls';
 import { GalleryView } from './components/GalleryView';
 import { LightboxModal } from './components/LightboxModal';
-import { FlaskCodeViewer } from './components/FlaskCodeViewer';
 import { DeploymentDocs } from './components/DeploymentDocs';
+import { CropResizeStudio } from './components/CropResizeStudio';
+import { HumanClassifierStudio } from './components/HumanClassifierStudio';
 import { ScrapedImage } from './utils/scraperLogic';
 import { SAMPLE_PRESETS } from './utils/samplePages';
 import { triggerBlobDownload } from './utils/downloader';
@@ -24,17 +27,12 @@ import { fetchApiJson } from './utils/safeFetchJson';
 import { AlertCircle, CheckCircle2, ArrowUpRight } from 'lucide-react';
 
 export default function App() {
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    try {
-      const stored = localStorage.getItem('theme');
-      if (stored === 'light' || stored === 'dark') return stored;
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    } catch {
-      return 'dark';
-    }
-  });
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [themeHydrated, setThemeHydrated] = useState<boolean>(false);
 
-  const [activeTab, setActiveTab] = useState<'scraper' | 'code' | 'docs'>('scraper');
+  const [activeTab, setActiveTab] = useState<'scraper' | 'crop' | 'classifier' | 'docs'>('scraper');
+  const [cropSeedImages, setCropSeedImages] = useState<ScrapedImage[]>([]);
+  const [classifierSeedImages, setClassifierSeedImages] = useState<ScrapedImage[]>([]);
   const [images, setImages] = useState<ScrapedImage[]>([]);
   const [pageTitle, setPageTitle] = useState<string>('');
   const [sourceUrl, setSourceUrl] = useState<string>('');
@@ -82,21 +80,100 @@ export default function App() {
     }, 4000);
   }, []);
 
+  const handleClearCropSeed = useCallback(() => {
+    setCropSeedImages([]);
+  }, []);
+
+  const handleClearClassifierSeed = useCallback(() => {
+    setClassifierSeedImages([]);
+  }, []);
+
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
   }, []);
 
-  // Sync theme with document element
+  const handleSelectTab = useCallback((nextTab: 'scraper' | 'crop' | 'classifier' | 'docs') => {
+    setActiveTab(nextTab);
+    try {
+      const nextUrl = new URL(window.location.href);
+      if (nextTab === 'scraper') {
+        nextUrl.searchParams.delete('tab');
+      } else {
+        nextUrl.searchParams.set('tab', nextTab);
+      }
+      if (nextUrl.toString() !== window.location.href) {
+        window.history.pushState({ tab: nextTab }, '', nextUrl.toString());
+      }
+    } catch {
+      // ignore history errors inside sandboxed iframes
+    }
+  }, []);
+
+  // Resolve persisted/system theme and initial URL ?tab= on client mount
   useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlTab = params.get('tab');
+      if (
+        urlTab === 'scraper' ||
+        urlTab === 'crop' ||
+        urlTab === 'classifier' ||
+        urlTab === 'docs'
+      ) {
+        setActiveTab(urlTab);
+      }
+    } catch {
+      // ignore URL parsing errors
+    }
+
+    const onPopState = () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const urlTab = params.get('tab');
+        if (urlTab === 'crop' || urlTab === 'classifier' || urlTab === 'docs') {
+          setActiveTab(urlTab);
+        } else {
+          setActiveTab('scraper');
+        }
+      } catch {
+        setActiveTab('scraper');
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+
+    try {
+      const stored = localStorage.getItem('theme');
+      if (stored === 'light' || stored === 'dark') {
+        setTheme(stored);
+      } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        setTheme('dark');
+      }
+    } catch {
+      // ignore storage restrictions
+    }
+    setThemeHydrated(true);
+
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+    };
+  }, []);
+
+  // Sync theme with document element after initial client hydration
+  useEffect(() => {
+    if (!themeHydrated) return;
     if (theme === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
     }
-    localStorage.setItem('theme', theme);
-  }, [theme]);
+    try {
+      localStorage.setItem('theme', theme);
+    } catch {
+      // ignore storage restrictions
+    }
+  }, [theme, themeHydrated]);
 
   const applyScrapeResponse = useCallback(
     (data: any, fallbackUrl: string, successLabel?: string) => {
@@ -553,15 +630,15 @@ export default function App() {
     }
   };
 
-  const handleExportFlaskZip = async () => {
+  const handleExportProjectZip = async () => {
     setIsExportingZip(true);
     try {
-      const response = await fetch('/api/export-flask-project');
-      if (!response.ok) throw new Error('Failed to create Flask project bundle.');
+      const response = await fetch('/api/export-full-project');
+      if (!response.ok) throw new Error('Failed to create project archive.');
 
       const blob = await response.blob();
-      triggerBlobDownload(blob, 'flask_image_scraper_project.zip');
-      showToast('Flask project exported successfully as ready-to-run ZIP!');
+      triggerBlobDownload(blob, 'fullres_scraper_full_codebase.zip');
+      showToast('Full codebase exported successfully as ready-to-run ZIP!');
     } catch (err: any) {
       setErrorMessage(`Export failed: ${err.message}`);
     } finally {
@@ -589,8 +666,8 @@ export default function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         activeTab={activeTab}
-        onSelectTab={setActiveTab}
-        onExportFlaskZip={handleExportFlaskZip}
+        onSelectTab={handleSelectTab}
+        onExportProjectZip={handleExportProjectZip}
         isExportingZip={isExportingZip}
       />
 
@@ -631,156 +708,196 @@ export default function App() {
         )}
 
         {/* Tab 1: Scraper & Contact-Sheet Studio */}
-        {activeTab === 'scraper' && (
-          <div className="space-y-6">
-            <ScraperControls
-              onScrape={handleScrape}
-              onFetchInstagramProfile={handleFetchInstagramProfile}
-              isLoading={isLoading}
-              currentUrl={sourceUrl}
-              relayUrl={relayUrl}
-              onRelayUrlChange={setRelayUrl}
-              geoBlocked={isGeoBlocked}
-              instagramSession={instagramSession}
-              onInstagramSessionChange={setInstagramSession}
-              instagramMaxPosts={instagramMaxPosts}
-              onInstagramMaxPostsChange={setInstagramMaxPosts}
-              instagramLoginRequired={isInstagramLoginRequired}
-              requestedMode={requestedMode}
-              onModeHandled={() => setRequestedMode(null)}
-            />
-
-            {progressiveState && (
-              <ProgressiveDownloadBar
-                progress={progressiveState}
-                modeLabel={progressiveModeLabel}
-                onCancel={handleCancelDirectSave}
-                onRetryFailed={handleRetryFailedDirectSave}
-                onDismiss={handleDismissDirectSave}
-              />
-            )}
-
-            {/* Loading Skeleton Grid matching contact-sheet cards */}
-            {isLoading && images.length === 0 && (
-              <div
-                aria-label="Extracting images"
-                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5"
-              >
-                {Array.from({ length: 8 }).map((_, idx) => (
-                  <div
-                    key={idx}
-                    className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden animate-pulse"
-                  >
-                    <div className="aspect-[4/3] bg-zinc-200/70 dark:bg-zinc-800/60" />
-                    <div className="p-3.5 space-y-2.5">
-                      <div className="h-3.5 w-3/4 bg-zinc-200 dark:bg-zinc-800 rounded" />
-                      <div className="h-3 w-1/2 bg-zinc-100 dark:bg-zinc-800/70 rounded" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Studio Workflow Primer — visible only before first extraction */}
-            {!isLoading && images.length === 0 && (
-              <section className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
-                <div className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 flex flex-col justify-between gap-4">
-                  <div>
-                    <div className="text-xs font-mono text-zinc-400 dark:text-zinc-500">01.</div>
-                    <h3 className="font-display text-base font-bold text-zinc-950 dark:text-white mt-1.5">
-                      Un-shrink & Crawl Subpages
-                    </h3>
-                    <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 mt-1.5 leading-relaxed">
-                      Parses srcset descriptors, strips CDN resize queries, and follows linked detail pages to uncover true high-resolution masters.
-                    </p>
-                  </div>
-                  {firstSamplePreset && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleScrape(firstSamplePreset.url, firstSamplePreset.html, true, relayUrl)
-                      }
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline self-start cursor-pointer"
-                    >
-                      <span>Run Nature Sample</span>
-                      <ArrowUpRight className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-
-                <div className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 flex flex-col justify-between gap-4">
-                  <div>
-                    <div className="text-xs font-mono text-zinc-400 dark:text-zinc-500">02.</div>
-                    <h3 className="font-display text-base font-bold text-zinc-950 dark:text-white mt-1.5">
-                      Instagram Profiles & Carousels
-                    </h3>
-                    <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 mt-1.5 leading-relaxed">
-                      Extracts public grids & multi-slide carousels cleanly, or pass a sessionid cookie to paginate full timelines and resume batches.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setRequestedMode('instagram')}
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline self-start cursor-pointer"
-                  >
-                    <span>Open Instagram Extractor</span>
-                    <ArrowUpRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                <div className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 flex flex-col justify-between gap-4">
-                  <div>
-                    <div className="text-xs font-mono text-zinc-400 dark:text-zinc-500">03.</div>
-                    <h3 className="font-display text-base font-bold text-zinc-950 dark:text-white mt-1.5">
-                      Progressive Save & Flask Export
-                    </h3>
-                    <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 mt-1.5 leading-relaxed">
-                      Save masters directly in parallel streams, export filtered link lists, or download the self-contained Python Flask backend.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setRequestedMode('harvester')}
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline self-start cursor-pointer"
-                  >
-                    <span>Open-Tab Harvester</span>
-                    <ArrowUpRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </section>
-            )}
-
-            {images.length > 0 && (
-              <GalleryView
-                images={images}
-                pageTitle={pageTitle}
-                sourceUrl={sourceUrl}
-                unshrunkCount={unshrunkCount}
-                onSelectImage={setSelectedImage}
-                onBatchDownloadZip={handleBatchDownloadZip}
-                onDownloadIndividually={handleDownloadIndividually}
-                isDownloadingZip={isDownloadingZip}
-                isDirectSaving={Boolean(progressiveState?.isRunning)}
-                downloadProgress={downloadProgress}
-                hasMorePosts={Boolean(instagramContinuation?.hasMore)}
-                isLoadingMorePosts={isLoadingMorePosts}
-                onLoadMorePosts={handleLoadMoreInstagramPosts}
-                totalProfilePosts={instagramContinuation?.totalProfilePosts}
-              />
-            )}
-          </div>
-        )}
-
-        {/* Tab 2: Flask Project Code Explorer */}
-        {activeTab === 'code' && (
-          <FlaskCodeViewer
-            onExportZip={handleExportFlaskZip}
-            isExportingZip={isExportingZip}
+        <div
+          id="tabpanel-scraper"
+          role="tabpanel"
+          hidden={activeTab !== 'scraper'}
+          className={activeTab === 'scraper' ? 'space-y-6' : 'hidden'}
+        >
+          <ScraperControls
+            onScrape={handleScrape}
+            onFetchInstagramProfile={handleFetchInstagramProfile}
+            isLoading={isLoading}
+            currentUrl={sourceUrl}
+            relayUrl={relayUrl}
+            onRelayUrlChange={setRelayUrl}
+            geoBlocked={isGeoBlocked}
+            instagramSession={instagramSession}
+            onInstagramSessionChange={setInstagramSession}
+            instagramMaxPosts={instagramMaxPosts}
+            onInstagramMaxPostsChange={setInstagramMaxPosts}
+            instagramLoginRequired={isInstagramLoginRequired}
+            requestedMode={requestedMode}
+            onModeHandled={() => setRequestedMode(null)}
           />
-        )}
 
-        {/* Tab 3: Setup & Deployment Instructions */}
-        {activeTab === 'docs' && <DeploymentDocs />}
+          {progressiveState && (
+            <ProgressiveDownloadBar
+              progress={progressiveState}
+              modeLabel={progressiveModeLabel}
+              onCancel={handleCancelDirectSave}
+              onRetryFailed={handleRetryFailedDirectSave}
+              onDismiss={handleDismissDirectSave}
+            />
+          )}
+
+          {/* Loading Skeleton Grid matching contact-sheet cards */}
+          {isLoading && images.length === 0 && (
+            <div
+              aria-label="Extracting images"
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5"
+            >
+              {Array.from({ length: 8 }).map((_, idx) => (
+                <div
+                  key={idx}
+                  className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden animate-pulse"
+                >
+                  <div className="aspect-[4/3] bg-zinc-200/70 dark:bg-zinc-800/60" />
+                  <div className="p-3.5 space-y-2.5">
+                    <div className="h-3.5 w-3/4 bg-zinc-200 dark:bg-zinc-800 rounded" />
+                    <div className="h-3 w-1/2 bg-zinc-100 dark:bg-zinc-800/70 rounded" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Studio Workflow Primer — visible only before first extraction */}
+          {!isLoading && images.length === 0 && (
+            <section className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
+              <div className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 flex flex-col justify-between gap-4">
+                <div>
+                  <div className="text-xs font-mono text-zinc-400 dark:text-zinc-500">01.</div>
+                  <h3 className="font-display text-base font-bold text-zinc-950 dark:text-white mt-1.5">
+                    Un-shrink & Crawl Subpages
+                  </h3>
+                  <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 mt-1.5 leading-relaxed">
+                    Parses srcset descriptors, strips CDN resize queries, and follows linked detail pages to uncover true high-resolution masters.
+                  </p>
+                </div>
+                {firstSamplePreset && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleScrape(firstSamplePreset.url, firstSamplePreset.html, true, relayUrl)
+                    }
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline self-start cursor-pointer"
+                  >
+                    <span>Run Nature Sample</span>
+                    <ArrowUpRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <div className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 flex flex-col justify-between gap-4">
+                <div>
+                  <div className="text-xs font-mono text-zinc-400 dark:text-zinc-500">02.</div>
+                  <h3 className="font-display text-base font-bold text-zinc-950 dark:text-white mt-1.5">
+                    Instagram Profiles & Carousels
+                  </h3>
+                  <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 mt-1.5 leading-relaxed">
+                    Extracts public grids & multi-slide carousels cleanly, or pass a sessionid cookie to paginate full timelines and resume batches.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRequestedMode('instagram')}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline self-start cursor-pointer"
+                >
+                  <span>Open Instagram Extractor</span>
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 flex flex-col justify-between gap-4">
+                <div>
+                  <div className="text-xs font-mono text-zinc-400 dark:text-zinc-500">03.</div>
+                  <h3 className="font-display text-base font-bold text-zinc-950 dark:text-white mt-1.5">
+                    Progressive Save &amp; Open-Tab Harvester
+                  </h3>
+                  <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 mt-1.5 leading-relaxed">
+                    Save masters directly in parallel streams, export filtered link lists, or harvest geo-blocked galleries straight from your browser tab.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRequestedMode('harvester')}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline self-start cursor-pointer"
+                >
+                  <span>Open-Tab Harvester</span>
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </section>
+          )}
+
+          {images.length > 0 && (
+            <GalleryView
+              images={images}
+              pageTitle={pageTitle}
+              sourceUrl={sourceUrl}
+              unshrunkCount={unshrunkCount}
+              onSelectImage={setSelectedImage}
+              onBatchDownloadZip={handleBatchDownloadZip}
+              onDownloadIndividually={handleDownloadIndividually}
+              isDownloadingZip={isDownloadingZip}
+              isDirectSaving={Boolean(progressiveState?.isRunning)}
+              downloadProgress={downloadProgress}
+              hasMorePosts={Boolean(instagramContinuation?.hasMore)}
+              isLoadingMorePosts={isLoadingMorePosts}
+              onLoadMorePosts={handleLoadMoreInstagramPosts}
+              totalProfilePosts={instagramContinuation?.totalProfilePosts}
+              onSendToCropResize={(targets) => {
+                setCropSeedImages(targets);
+                handleSelectTab('crop');
+              }}
+              onSendToHumanClassifier={(targets) => {
+                setClassifierSeedImages(targets);
+                handleSelectTab('classifier');
+              }}
+            />
+          )}
+        </div>
+
+        {/* Tab 2: Batch Directory Crop & Resize Studio */}
+        <div
+          id="tabpanel-crop"
+          role="tabpanel"
+          hidden={activeTab !== 'crop'}
+          className={activeTab === 'crop' ? 'block' : 'hidden'}
+        >
+          <CropResizeStudio
+            seededScrapedImages={cropSeedImages}
+            seededSourceUrl={sourceUrl}
+            onClearSeeded={handleClearCropSeed}
+            onNotify={showToast}
+          />
+        </div>
+
+        {/* Tab 3: AI Human Identity Classifier */}
+        <div
+          id="tabpanel-classifier"
+          role="tabpanel"
+          hidden={activeTab !== 'classifier'}
+          className={activeTab === 'classifier' ? 'block' : 'hidden'}
+        >
+          <HumanClassifierStudio
+            seededScrapedImages={classifierSeedImages}
+            seededSourceUrl={sourceUrl}
+            onClearSeeded={handleClearClassifierSeed}
+            onNotify={showToast}
+          />
+        </div>
+
+        {/* Tab 4: Setup & Deployment Instructions */}
+        <div
+          id="tabpanel-docs"
+          role="tabpanel"
+          hidden={activeTab !== 'docs'}
+          className={activeTab === 'docs' ? 'block' : 'hidden'}
+        >
+          <DeploymentDocs />
+        </div>
       </main>
 
       <LightboxModal
@@ -799,7 +916,7 @@ export default function App() {
               FullRes
             </span>
             <span aria-hidden="true">·</span>
-            <span>High-Resolution Image Extractor & Flask Studio</span>
+            <span>High-Resolution Image Extractor &amp; Contact-Sheet Studio</span>
           </div>
           <div>Contact-sheet previewer, link harvester, and batch ZIP packager</div>
         </div>

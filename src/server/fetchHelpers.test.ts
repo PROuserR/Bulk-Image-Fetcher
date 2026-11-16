@@ -8,6 +8,8 @@ import {
   sanitizeDownloadFilename,
   ensureUniqueFilename,
   escapeHtml,
+  isValidImageBuffer,
+  resolveImageBufferWithFallbacks,
 } from './fetchHelpers.ts';
 
 test('buildRelayTarget handles empty, {url} placeholder, url= suffix, and query params', () => {
@@ -67,3 +69,39 @@ test('escapeHtml escapes sensitive HTML characters', () => {
     '&lt;script&gt;&quot;alert(&#039;xss&#039; &amp; test)&quot;&lt;/script&gt;'
   );
 });
+
+test('isValidImageBuffer rejects HTML/JSON error responses and accepts binary image buffers', () => {
+  assert.equal(isValidImageBuffer(Buffer.alloc(0), 'image/jpeg'), false);
+  assert.equal(isValidImageBuffer(Buffer.from('<!DOCTYPE html><html></html>'), 'image/jpeg'), false);
+  assert.equal(isValidImageBuffer(Buffer.from('{"error":"not found"}'), 'application/json'), false);
+  assert.equal(isValidImageBuffer(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]), 'image/jpeg'), true);
+});
+
+test('resolveImageBufferWithFallbacks resolves detail page and fallback URLs in order', async () => {
+  const calls: string[] = [];
+  const fakeBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+  const res = await resolveImageBufferWithFallbacks({
+    imageUrl: 'https://cdn.example.com/expired.jpg',
+    linkedPageUrl: 'https://example.com/photo/42',
+    fallbackUrl: 'https://cdn.example.com/fallback.png',
+    resolveDetailPageUrl: async () => 'https://cdn.example.com/fresh-master.png',
+    fetcher: async (url) => {
+      calls.push(url);
+      if (url.includes('fresh-master.png')) {
+        return new Response(new Uint8Array(fakeBytes), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        });
+      }
+      return new Response('nope', { status: 403 });
+    },
+  });
+
+  assert.ok(res);
+  assert.equal(res.contentType, 'image/png');
+  assert.deepEqual(calls, [
+    'https://cdn.example.com/expired.jpg',
+    'https://cdn.example.com/fresh-master.png',
+  ]);
+});
+

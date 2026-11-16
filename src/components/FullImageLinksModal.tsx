@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   X,
@@ -274,71 +276,49 @@ export const FullImageLinksModal: React.FC<FullImageLinksModalProps> = ({
         {/* View Mode Navigation & Stackable Filter Row */}
         <div className="px-5 py-3 border-b border-zinc-200 dark:border-zinc-800 space-y-2.5 bg-white dark:bg-[#111318] text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="inline-flex items-center gap-1 flex-wrap p-1 bg-zinc-100 dark:bg-[#0B0C10] border border-zinc-200 dark:border-zinc-800 rounded-lg">
-              <button
-                type="button"
-                onClick={() => setViewMode('direct_links')}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
-                  viewMode === 'direct_links'
-                    ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-xs'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-200'
-                }`}
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Direct Master Links (CDN)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setViewMode('webpage_links')}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
-                  viewMode === 'webpage_links'
-                    ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-xs'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-200'
-                }`}
-              >
-                <Globe className="w-3.5 h-3.5" />
-                <span>Master Webpage Links</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setViewMode('table')}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
-                  viewMode === 'table'
-                    ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-xs'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-200'
-                }`}
-              >
-                <TableIcon className="w-3.5 h-3.5" />
-                <span>Interactive Table</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setViewMode('json')}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
-                  viewMode === 'json'
-                    ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-xs'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-200'
-                }`}
-              >
-                <FileCode className="w-3.5 h-3.5" />
-                <span>JSON</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setViewMode('csv')}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
-                  viewMode === 'csv'
-                    ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-xs'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-200'
-                }`}
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>CSV</span>
-              </button>
+            <div
+              role="tablist"
+              aria-label="Export Link Formats"
+              className="inline-flex items-center gap-1 flex-wrap p-1 bg-zinc-100 dark:bg-[#0B0C10] border border-zinc-200 dark:border-zinc-800 rounded-lg"
+            >
+              {(
+                [
+                  { id: 'direct_links', label: 'Direct Master Links (CDN)', icon: Download },
+                  { id: 'webpage_links', label: 'Master Webpage Links', icon: Globe },
+                  { id: 'table', label: 'Interactive Table', icon: TableIcon },
+                  { id: 'json', label: 'JSON', icon: FileCode },
+                  { id: 'csv', label: 'CSV', icon: FileText },
+                ] as const
+              ).map((tab, idx, arr) => {
+                const Icon = tab.icon;
+                const isSelected = viewMode === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isSelected}
+                    onClick={() => setViewMode(tab.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowRight') {
+                        e.preventDefault();
+                        setViewMode(arr[(idx + 1) % arr.length].id);
+                      } else if (e.key === 'ArrowLeft') {
+                        e.preventDefault();
+                        setViewMode(arr[(idx - 1 + arr.length) % arr.length].id);
+                      }
+                    }}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-xs'
+                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
             </div>
 
             <div className="relative">
