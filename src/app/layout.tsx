@@ -74,7 +74,7 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body className="bg-[#F9F9FB] dark:bg-[#090A0F] text-zinc-900 dark:text-zinc-100 font-sans antialiased min-h-screen selection:bg-blue-600/20 selection:text-blue-700 dark:selection:text-blue-300">
+      <body className="studio-canvas-bg text-[#141413] dark:text-[#F5F4F0] font-sans antialiased min-h-screen selection:bg-blue-600/20 selection:text-blue-700 dark:selection:text-blue-300">
         {children}
       </body>
     </html>

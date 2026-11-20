@@ -6,9 +6,13 @@ import path from 'path';
 import sharp from 'sharp';
 import JSZip from 'jszip';
 import {
+  analyzeHumanImageBatch,
   buildClassifiedDiskZip,
   buildDiskImageThumbnail,
-  mapGeminiError,
+  clusterHumanProfilesOffline,
+  mapClassifierError,
+  OfflineClassifierError,
+  OfflineRunnerLike,
   writeClassifiedDiskFolders,
 } from './humanClassifierService.ts';
 import {
@@ -45,16 +49,58 @@ function sampleProfile(id: string, filename: string, shape: string): HumanImageB
   };
 }
 
-test('mapGeminiError classifies auth, quota, and 404 errors clearly', () => {
-  const err403 = mapGeminiError(new Error('PERMISSION_DENIED: invalid key'));
-  assert.equal(err403.status, 403);
-  assert.match(err403.message, /Settings > Secrets/i);
+test('mapClassifierError classifies missing runtime/model and timeout errors clearly', () => {
+  const errMissing = mapClassifierError(new Error('Offline InsightFace models missing'));
+  assert.equal(errMissing.status, 500);
+  assert.match(errMissing.message, /Offline Python AI runtime or model missing/i);
 
-  const err429 = mapGeminiError(new Error('RESOURCE_EXHAUSTED: 429 quota exceeded'));
-  assert.equal(err429.status, 429);
+  const errTimeout = mapClassifierError(new Error('Worker timed out after 180s'));
+  assert.equal(errTimeout.status, 504);
 
-  const err404 = mapGeminiError(new Error('404 NOT_FOUND'));
-  assert.equal(err404.status, 404);
+  const passthrough = new OfflineClassifierError('Custom error', 400);
+  assert.equal(mapClassifierError(passthrough), passthrough);
+});
+
+test('analyzeHumanImageBatch & clusterHumanProfilesOffline work cleanly with offline runner interface', async () => {
+  const mockWorker: OfflineRunnerLike = {
+    runCommand: async (cmd) => {
+      if (cmd === 'analyze-batch') {
+        return {
+          profiles: [
+            sampleProfile('img_1', 'a1.jpg', 'oval'),
+            sampleProfile('img_2', 'a2.jpg', 'oval'),
+          ],
+        } as any;
+      }
+      return {
+        clusters: [
+          {
+            displayName: 'Person (oval, mesomorph)',
+            dominantFaceShape: 'oval',
+            dominantSomatotype: 'mesomorph',
+            matchRationale: 'Matched offline via ArcFace embedding',
+            confidence: 0.95,
+            imageIds: ['img_1', 'img_2'],
+          },
+        ],
+      } as any;
+    },
+  };
+
+  const profs = await analyzeHumanImageBatch(
+    [
+      { imageId: 'img_1', filename: 'a1.jpg', mimeType: 'image/jpeg', base64Data: 'AAAA' },
+      { imageId: 'img_2', filename: 'a2.jpg', mimeType: 'image/jpeg', base64Data: 'AAAA' },
+    ],
+    mockWorker
+  );
+  assert.equal(profs.length, 2);
+  assert.equal(profs[0].facialStructure.faceShape, 'oval');
+
+  const clustered = await clusterHumanProfilesOffline(profs, 'indexed', mockWorker);
+  assert.equal(clustered.clusters.length, 1);
+  assert.equal(clustered.clusters[0].folderName, 'person_01');
+  assert.equal(clustered.manifest.uniqueHumansCount, 1);
 });
 
 test('writeClassifiedDiskFolders and buildClassifiedDiskZip organize each human into separate folders cleanly', async () => {

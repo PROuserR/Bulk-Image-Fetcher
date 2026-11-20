@@ -252,4 +252,89 @@ test('extractImagesFromHtml resolves relative /photo/ links against imagefap.com
   );
 });
 
+test('extractGalleryMapFromDetailPage & extractBestImageFromDetailPage handle JSON-escaped /images/full/ URLs', async () => {
+  const { extractBestImageFromDetailPage, extractGalleryMapFromDetailPage } = await import('./htmlExtractor');
+  const html = `
+    <html>
+      <body>
+        <a href="/photo/44556677/">
+          <img id="mainPhoto" src="https://cdnc.imagefap.com/images/full/12/445/44556677.jpg?secure=abc\\u0026v=2" width="2400" height="1600">
+        </a>
+        <script>
+          window.__strip = ["https:\\/\\/cdnc.imagefap.com\\/images\\/full\\/12\\/445\\/44556678.jpg?secure=xyz\\u0026v=2"];
+        </script>
+      </body>
+    </html>
+  `;
+  const map = extractGalleryMapFromDetailPage(html, 'https://www.imagefap.com/photo/44556677/?gid=123');
+  assert.equal(
+    map.get('44556678')?.fullUrl,
+    'https://cdnc.imagefap.com/images/full/12/445/44556678.jpg?secure=xyz&v=2'
+  );
+
+  const best = extractBestImageFromDetailPage(html, 'https://www.imagefap.com/photo/44556677/?gid=123');
+  assert.ok(best !== null);
+  assert.ok(best?.url.includes('/images/full/12/445/44556677.jpg'));
+  assert.equal(best?.width, 2400);
+});
+
+test('extractImagesFromHtml captures lazy-loaded ImageFap thumbnails with placeholder blank.gif src', () => {
+  const html = `
+    <a href="/photo/77889900/?gid=555&page=0">
+      <img src="/img/blank.gif" data-original="https://cdnc.imagefap.com/images/thumb/77/889/77889900.jpg" alt="Lazy Thumb">
+    </a>
+  `;
+  const result = extractImagesFromHtml(html, 'https://www.imagefap.com/pictures/555/lazy?view=2');
+  assert.equal(result.images.length, 1);
+  assert.equal(result.images[0].thumbnailUrl, 'https://cdnc.imagefap.com/images/thumb/77/889/77889900.jpg');
+  assert.equal(result.images[0].linkedPageUrl, 'https://www.imagefap.com/photo/77889900/?gid=555&page=0');
+});
+
+test('extractImagesFromHtml extracts album 1920x1080 CDN masters and excludes related-album / video teasers', () => {
+  const albumHtml = `<!DOCTYPE html>
+  <html>
+    <head><title>WLT S02E01 New Place New Personalities</title></head>
+    <body>
+      <main>
+        <div class="album-images">
+          <a href="https://pics-storage-1.archive.example/contents/albums/main/1920x1080/30000/30560/1556864.jpg" data-fancybox="gallery">
+            <img src="https://pics-storage-1.archive.example/contents/albums/main/200x150/30000/30560/1556864.jpg" width="200" height="150" alt="Photo 1">
+          </a>
+          <a href="#" data-src="https://pics-storage-1.archive.example/contents/albums/main/1920x1080/30000/30560/1556865.jpg">
+            <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-webp="https://pics-storage-1.archive.example/contents/albums/main/200x150/30000/30560/1556865.jpg" alt="Photo 2">
+          </a>
+        </div>
+        <section class="related-albums">
+          <a href="/albums/99001/unrelated-other-album/">
+            <img src="https://pics-storage-1.archive.example/contents/albums/main/200x150/99000/99001/111111.jpg" alt="Other Album">
+          </a>
+          <a href="/videos/77777/some-clip/">
+            <img src="https://pics-storage-1.archive.example/contents/videos_screenshots/77000/77777/preview.jpg" alt="Related Video">
+          </a>
+        </section>
+      </main>
+    </body>
+  </html>`;
+
+  const result = extractImagesFromHtml(
+    albumHtml,
+    'https://archive.example/albums/30560/wlt-s02e01-new-place-new-personalities/'
+  );
+  assert.equal(result.images.length, 2);
+  assert.equal(
+    result.images[0].fullUrl,
+    'https://pics-storage-1.archive.example/contents/albums/main/1920x1080/30000/30560/1556864.jpg'
+  );
+  assert.equal(result.images[0].width, 1920);
+  assert.equal(result.images[0].height, 1080);
+  assert.equal(result.images[0].resolutionTier, 'hd');
+  assert.equal(
+    result.images[1].fullUrl,
+    'https://pics-storage-1.archive.example/contents/albums/main/1920x1080/30000/30560/1556865.jpg'
+  );
+  assert.equal(result.images[1].isUnshrunk, true);
+});
+
+
+
 

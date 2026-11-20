@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   analyzeHumanImageBatch,
-  mapGeminiError,
+  mapClassifierError,
 } from '@/server/humanClassifierService';
 
 export const runtime = 'nodejs';
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     const profiles = await analyzeHumanImageBatch(images);
     return NextResponse.json({ profiles });
   } catch (err: unknown) {
-    const mapped = mapGeminiError(err);
+    const mapped = mapClassifierError(err);
     return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }
 }

@@ -50,6 +50,143 @@ export function isGeoBlockedHtml(html: string, responseUrl?: string): boolean {
 }
 
 /**
+ * Detects Cloudflare or JavaScript anti-bot challenge interstitial pages.
+ */
+export function isBotChallengeHtml(html: string): boolean {
+  if (!html) return false;
+  return (
+    html.includes('cf-browser-verification') ||
+    html.includes('_cf_chl_opt') ||
+    html.includes('/cdn-cgi/challenge-platform') ||
+    /<title>\s*(?:Just a moment\.\.\.|Attention Required!\s*\|\s*Cloudflare)\s*<\/title>/i.test(html) ||
+    html.includes('Enable JavaScript and cookies to continue')
+  );
+}
+
+/**
+ * Builds a non-UK HTML reader-relay URL for pages that geo-block server egress IPs.
+ */
+export function buildNonUkHtmlRelayUrl(targetUrl: string): string {
+  return `https://r.jina.ai/${targetUrl.trim()}`;
+}
+
+export interface HtmlFetchResult {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  url: string;
+  html: string;
+  usedNonUkRelay?: boolean;
+}
+
+/**
+ * Fetches raw HTML for a URL via a non-UK HTTP relay (preserves canonical url for relative links).
+ */
+export async function fetchHtmlViaNonUkRelay(
+  rawTargetUrl: string,
+  timeoutMs = 15000
+): Promise<HtmlFetchResult> {
+  const relayEndpoint = buildNonUkHtmlRelayUrl(rawTargetUrl);
+  let lastStatus = 502;
+  let lastText = '';
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const resp = await fetch(relayEndpoint, {
+        headers: {
+          'User-Agent': DEFAULT_USER_AGENT,
+          'x-respond-with': 'html',
+          'x-no-cache': 'true',
+          Accept: HTML_ACCEPT_HEADER,
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      lastStatus = resp.status;
+      lastText = resp.statusText;
+      const body = await resp.text();
+      if (resp.ok && body && body.includes('<') && !isGeoBlockedHtml(body, rawTargetUrl)) {
+        return {
+          ok: true,
+          status: resp.status,
+          statusText: resp.statusText,
+          url: rawTargetUrl,
+          html: body,
+          usedNonUkRelay: true,
+        };
+      }
+      if (resp.status !== 429 && resp.status !== 502 && resp.status !== 503) {
+        return {
+          ok: false,
+          status: resp.status,
+          statusText: resp.statusText,
+          url: rawTargetUrl,
+          html: body,
+          usedNonUkRelay: true,
+        };
+      }
+    } catch (err: any) {
+      lastText = err?.message || 'Relay timeout';
+    }
+    if (attempt === 0) {
+      await new Promise((r) => setTimeout(r, 600));
+    }
+  }
+
+  return {
+    ok: false,
+    status: lastStatus,
+    statusText: lastText,
+    url: rawTargetUrl,
+    html: '',
+    usedNonUkRelay: true,
+  };
+}
+
+/**
+ * Fetches a detail or gallery HTML page directly (or via explicit relayUrl),
+ * automatically falling back to the non-UK HTML relay if UK geo-blocking is detected.
+ */
+export async function fetchDetailPageHtmlSmart(
+  rawTargetUrl: string,
+  options: {
+    relayUrl?: string;
+    preferNonUkRelay?: boolean;
+    timeoutMs?: number;
+  } = {}
+): Promise<HtmlFetchResult> {
+  const { relayUrl = '', preferNonUkRelay = false, timeoutMs = 10000 } = options;
+  const cleanRelay = relayUrl.trim();
+
+  if (preferNonUkRelay && !cleanRelay) {
+    return fetchHtmlViaNonUkRelay(rawTargetUrl, timeoutMs);
+  }
+
+  const target = cleanRelay ? buildRelayTarget(rawTargetUrl, cleanRelay) : rawTargetUrl;
+  const resp = await fetch(target, {
+    headers: {
+      'User-Agent': DEFAULT_USER_AGENT,
+      Accept: HTML_ACCEPT_HEADER,
+      'Accept-Language': 'en-US,en;q=0.8',
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const html = await resp.text();
+  const resolvedUrl = cleanRelay ? rawTargetUrl : resp.url || rawTargetUrl;
+
+  if (!cleanRelay && isGeoBlockedHtml(html, resolvedUrl)) {
+    return fetchHtmlViaNonUkRelay(rawTargetUrl, Math.max(timeoutMs, 12000));
+  }
+
+  return {
+    ok: resp.ok,
+    status: resp.status,
+    statusText: resp.statusText,
+    url: resolvedUrl,
+    html,
+  };
+}
+
+/**
  * Determines whether the submitted URL string is a direct image URL or multi-line batch.
  */
 export function isDirectImageOrBatchInput(input: string): boolean {
@@ -73,7 +210,14 @@ export function resolveImageReferer(imageUrl: string, explicitReferer?: string):
     if (imageUrl.includes('cdninstagram.com') || imageUrl.includes('fbcdn.net')) {
       return 'https://www.instagram.com/';
     }
-    return new URL(imageUrl).origin;
+    const parsed = new URL(imageUrl);
+    if (/^(?:pics-storage|storage|media-storage)[-.0-9a-z]*\./i.test(parsed.hostname)) {
+      const parts = parsed.hostname.split('.');
+      if (parts.length >= 2) {
+        return `https://www.${parts.slice(-2).join('.')}/`;
+      }
+    }
+    return parsed.origin;
   } catch {
     return imageUrl;
   }

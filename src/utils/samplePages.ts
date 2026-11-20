@@ -340,3 +340,133 @@ export const SAMPLE_PRESETS: SamplePreset[] = [
 </html>`,
   },
 ];
+
+export const NESTED_HUB_PRESET = {
+  id: 'nested_galleries_hub',
+  name: 'Editorial Multi-Gallery Archive (3 Nested Galleries)',
+  url: 'https://photography-archive.local/',
+  description:
+    'Parent hub page linking to 3 independent child galleries, each with its own thumbnails linking to full-res master subpages.',
+  html: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Editorial Multi-Gallery Contact Sheet Archive</title>
+</head>
+<body>
+  <header>
+    <nav>
+      <a href="/">Archive Home</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+    </nav>
+  </header>
+  <main class="archive-index">
+    <article class="gallery-card">
+      <a href="/galleries/alpine-portraits" title="01. Alpine Studio Portraits">
+        <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=320&amp;fit=crop" data-fallback-url="/samples/humans/random_001.jpg" alt="Alpine Studio Portraits Cover" width="320" height="240">
+        <h3>01. Alpine Studio Portraits</h3>
+      </a>
+      <p>4 photos · Medium format portrait series</p>
+    </article>
+
+    <article class="gallery-card">
+      <a href="/galleries/coastal-horizons" title="02. Pacific Coastal Horizons">
+        <img src="https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=320&amp;fit=crop" data-fallback-url="/samples/humans/random_002.jpg" alt="Pacific Coastal Horizons Cover" width="320" height="240">
+        <h3>02. Pacific Coastal Horizons</h3>
+      </a>
+      <p>4 photos · Dawn shoreline studies</p>
+    </article>
+
+    <article class="gallery-card">
+      <a href="/galleries/nordic-architecture" title="03. Nordic Concrete &amp; Light">
+        <img src="https://images.unsplash.com/photo-1513694203232-719a280e022f?w=320&amp;fit=crop" data-fallback-url="/samples/humans/random_003.jpg" alt="Nordic Concrete & Light Cover" width="320" height="240">
+        <h3>03. Nordic Concrete &amp; Light</h3>
+      </a>
+      <p>4 photos · Architectural monographs</p>
+    </article>
+  </main>
+  <footer>
+    <a href="/privacy">Privacy</a>
+    <a href="/terms">Terms</a>
+  </footer>
+</body>
+</html>`,
+};
+
+export const NESTED_VIRTUAL_SUBPAGES: Record<string, string> = {
+  'https://photography-archive.local/': NESTED_HUB_PRESET.html,
+  'https://photography-archive.local/galleries/alpine-portraits': `<!DOCTYPE html>
+<html>
+<head><title>01. Alpine Studio Portraits</title></head>
+<body>
+  <div class="gallery-grid">
+    <a href="/photo/80101" data-fallback-url="/samples/humans/random_001.jpg">
+      <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=180&amp;fit=crop" data-fallback-url="/samples/humans/random_001.jpg" alt="Alpine Portrait 01" width="180" height="120">
+    </a>
+    <a href="/photo/80102" data-fallback-url="/samples/humans/random_002.jpg">
+      <img src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=180&amp;fit=crop" data-fallback-url="/samples/humans/random_002.jpg" alt="Alpine Portrait 02" width="180" height="120">
+    </a>
+    <a href="/photo/80103" data-fallback-url="/samples/humans/random_003.jpg">
+      <img src="https://images.unsplash.com/photo-1517841905240-472988babdf9?w=180&amp;fit=crop" data-fallback-url="/samples/humans/random_003.jpg" alt="Alpine Portrait 03" width="180" height="120">
+    </a>
+    <a href="/photo/80104" data-fallback-url="/samples/humans/random_004.jpg">
+      <img src="https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=180&amp;fit=crop" data-fallback-url="/samples/humans/random_004.jpg" alt="Alpine Portrait 04" width="180" height="120">
+    </a>
+  </div>
+</body>
+</html>`,
+  'https://photography-archive.local/galleries/coastal-horizons': `<!DOCTYPE html>
+<html>
+<head><title>02. Pacific Coastal Horizons</title></head>
+<body>
+  <div class="gallery-grid">
+    <a href="/photo/80201" data-fallback-url="/samples/humans/random_005.jpg">
+      <img src="https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=180&amp;fit=crop" data-fallback-url="/samples/humans/random_005.jpg" alt="Coastal Horizon 01" width="180" height="120">
+    </a>
+    <a href="/photo/80202" data-fallback-url="/samples/humans/random_006.jpg">
+      <img src="https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=180&amp;fit=crop" data-fallback-url="/samples/humans/random_006.jpg" alt="Coastal Horizon 02" width="180" height="120">
+    </a>
+    <a href="/photo/80203" data-fallback-url="/samples/humans/random_001.jpg">
+      <img src="https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=180&amp;fit=crop" data-fallback-url="/samples/humans/random_001.jpg" alt="Coastal Horizon 03" width="180" height="120">
+    </a>
+    <a href="/photo/80204" data-fallback-url="/samples/humans/random_002.jpg">
+      <img src="https://images.unsplash.com/photo-1472214103451-9374bd1c798e?w=180&amp;fit=crop" data-fallback-url="/samples/humans/random_002.jpg" alt="Coastal Horizon 04" width="180" height="120">
+    </a>
+  </div>
+</body>
+</html>`,
+  'https://photography-archive.local/galleries/nordic-architecture': `<!DOCTYPE html>
+<html>
+<head><title>03. Nordic Concrete &amp; Light</title></head>
+<body>
+  <div class="gallery-grid">
+    <a href="/photo/80301" data-fallback-url="/samples/humans/random_003.jpg">
+      <img src="https://images.unsplash.com/photo-1513694203232-719a280e022f?w=180&amp;fit=crop" data-fallback-url="/samples/humans/random_003.jpg" alt="Nordic Concrete 01" width="180" height="120">
+    </a>
+    <a href="/photo/80302" data-fallback-url="/samples/humans/random_004.jpg">
+      <img src="https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=180&amp;fit=crop" data-fallback-url="/samples/humans/random_004.jpg" alt="Nordic Concrete 02" width="180" height="120">
+    </a>
+    <a href="/photo/80303" data-fallback-url="/samples/humans/random_005.jpg">
+      <img src="https://images.unsplash.com/photo-1497366216548-37526070297c?w=180&amp;fit=crop" data-fallback-url="/samples/humans/random_005.jpg" alt="Nordic Concrete 03" width="180" height="120">
+    </a>
+    <a href="/photo/80304" data-fallback-url="/samples/humans/random_006.jpg">
+      <img src="https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=180&amp;fit=crop" data-fallback-url="/samples/humans/random_006.jpg" alt="Nordic Concrete 04" width="180" height="120">
+    </a>
+  </div>
+</body>
+</html>`,
+  'https://photography-archive.local/photo/80101': `<html><body><img id="mainPhoto" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=3840&amp;q=100" width="3840" height="2560"></body></html>`,
+  'https://photography-archive.local/photo/80102': `<html><body><img id="mainPhoto" src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=3840&amp;q=100" width="3840" height="2560"></body></html>`,
+  'https://photography-archive.local/photo/80103': `<html><body><img id="mainPhoto" src="https://images.unsplash.com/photo-1517841905240-472988babdf9?w=4090&amp;q=100" width="4090" height="2727"></body></html>`,
+  'https://photography-archive.local/photo/80104': `<html><body><img id="mainPhoto" src="https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=3840&amp;q=100" width="3840" height="2560"></body></html>`,
+  'https://photography-archive.local/photo/80201': `<html><body><img id="mainPhoto" src="https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=3840&amp;q=100" width="3840" height="2160"></body></html>`,
+  'https://photography-archive.local/photo/80202': `<html><body><img id="mainPhoto" src="https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=3840&amp;q=100" width="3840" height="2160"></body></html>`,
+  'https://photography-archive.local/photo/80203': `<html><body><img id="mainPhoto" src="https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=3840&amp;q=100" width="3840" height="2560"></body></html>`,
+  'https://photography-archive.local/photo/80204': `<html><body><img id="mainPhoto" src="https://images.unsplash.com/photo-1472214103451-9374bd1c798e?w=3840&amp;q=100" width="3840" height="2560"></body></html>`,
+  'https://photography-archive.local/photo/80301': `<html><body><img id="mainPhoto" src="https://images.unsplash.com/photo-1513694203232-719a280e022f?w=3840&amp;q=100" width="3840" height="2560"></body></html>`,
+  'https://photography-archive.local/photo/80302': `<html><body><img id="mainPhoto" src="https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=3840&amp;q=100" width="3840" height="2560"></body></html>`,
+  'https://photography-archive.local/photo/80303': `<html><body><img id="mainPhoto" src="https://images.unsplash.com/photo-1497366216548-37526070297c?w=3840&amp;q=100" width="3840" height="2560"></body></html>`,
+  'https://photography-archive.local/photo/80304': `<html><body><img id="mainPhoto" src="https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=3840&amp;q=100" width="3840" height="2560"></body></html>`,
+};
+

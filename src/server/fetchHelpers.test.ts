@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildRelayTarget,
+  buildNonUkHtmlRelayUrl,
   isGeoBlockedHtml,
   isDirectImageOrBatchInput,
   resolveImageReferer,
@@ -26,6 +27,10 @@ test('buildRelayTarget handles empty, {url} placeholder, url= suffix, and query 
     buildRelayTarget('https://example.com/p', 'https://relay.dev/proxy'),
     'https://relay.dev/proxy?url=https%3A%2F%2Fexample.com%2Fp'
   );
+  assert.equal(
+    buildNonUkHtmlRelayUrl('https://www.imagefap.com/gallery/14385550?view=2'),
+    'https://r.jina.ai/https://www.imagefap.com/gallery/14385550?view=2'
+  );
 });
 
 test('isGeoBlockedHtml detects UK ban markers', () => {
@@ -48,6 +53,10 @@ test('resolveImageReferer selects proper site referer for Instagram, ImageFap, a
   assert.equal(resolveImageReferer('https://scontent.cdninstagram.com/v/abc.jpg'), 'https://www.instagram.com/');
   assert.equal(resolveImageReferer('https://instagram.fnyc1-1.fna.fbcdn.net/v/abc.jpg'), 'https://www.instagram.com/');
   assert.equal(resolveImageReferer('https://cdnc.imagefap.com/images/full/1.jpg'), 'https://www.imagefap.com/');
+  assert.equal(
+    resolveImageReferer('https://pics-storage-1.archive.example/contents/albums/main/1920x1080/30000/30560/1556864.jpg'),
+    'https://www.archive.example/'
+  );
   assert.equal(resolveImageReferer('https://images.unsplash.com/photo-1', 'https://custom.site/page'), 'https://custom.site/page');
   assert.equal(resolveImageReferer('https://images.unsplash.com/photo-1'), 'https://images.unsplash.com');
 });

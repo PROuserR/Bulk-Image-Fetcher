@@ -60,6 +60,15 @@ FullRes reverses those layers in a single pipeline:
 - **Interactive 8-Handle Crop Canvas**: Drag corners, edges, or reposition the selection box with rule-of-thirds guides and aspect-ratio locks (`Free`, `Original`, `1:1`, `4:5`, `16:9`, `3:2`, `4:3`, `9:16`).
 - **Flexible Resize Modes**: Supports `Original`, `Width × Height`, `Fit Max Edge`, and `Percentage Scale` with `Cover`, `Contain`, `Fill`, and `Inside` strategies across `JPEG`, `PNG`, `WebP`, and `AVIF`.
 
+### 4. Offline Human Identity Classifier
+- **100% Local Python AI Pipeline**: Combines **InsightFace (`buffalo_l` / ArcFace 512-D facial embeddings)**, **MediaPipe Pose Landmarker** (shoulder/hip/stature body proportions), and **scikit-learn agglomerative clustering** over a persistent Python worker (`/python/human_classifier.py`).
+- **Dual Intake & Grouping**: Classify browser-dropped image batches, scraped gallery hits, or an entire local server directory, grouping each unique human into a dedicated editable subfolder and exporting as a ZIP or organized disk folders.
+
+### 5. Local Open-Source Gemma 4 Chat & Auto-Captioner
+- **Local Multimodal LLM (`Gemma 4 E2B` + Vision Projector)**: Runs locally via `llama.cpp` (`llama-server` on loopback) with zero external API keys required.
+- **Multi-Image Conversational Chat**: Attach up to 6 images per turn, compare outfits/subjects side-by-side, stream replies token-by-token, and reuse one-click multimodal prompt templates.
+- **Batch Auto-Captioner (Files or Directory)**: Select multiple browser files, hand off scraped images, or point to a server disk directory (`./public/samples/humans`) to generate `Detailed Description`, `Dataset Caption (1-Sentence)`, `Structured JSON + Tags`, or `Accessibility Alt-Text`, optionally writing `.txt` sidecar caption files next to images and exporting JSON, CSV, Markdown, or a combined `.zip` bundle.
+
 ---
 
 ## Tech Stack
@@ -68,8 +77,9 @@ FullRes reverses those layers in a single pipeline:
 | :--- | :--- |
 | **Framework & UI** | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4, Lucide Icons |
 | **Image & Archive Engine** | `sharp` (server native), HTML5 Canvas (client), `jszip` (streaming & browser ZIPs) |
+| **Local Offline AI** | `llama.cpp` + **Gemma 4 E2B** (multimodal vision chat & captioning), Python (`insightface`, `mediapipe`, `scikit-learn`, `opencv-python-headless`) |
 | **Scraping & Networking** | `cheerio`, `got-scraping`, `tough-cookie`, `p-limit`, `playwright-core` |
-| **Testing** | Node.js built-in test runner (`node:test`) via `tsx --test` (**68 unit tests**) |
+| **Testing** | Node.js built-in test runner (`node:test`) via `tsx --test` (**83 unit tests**) |
 
 ---
 
@@ -170,6 +180,12 @@ npm start         # Serves the production build on port 3000
 | `GET` | `/api/crop-resize/local-preview` | Serves sanitized local thumbnails for the Crop & Resize workspace. |
 | `POST` | `/api/crop-resize/process-dir` | Batch crops/resizes a local directory with `sharp` and saves outputs to disk. |
 | `POST` | `/api/crop-resize/download-zip` | Streams processed images from a local directory as a `.zip` archive. |
+| `POST` | `/api/ai/classify-humans/disk-classify` | Streams offline InsightFace + MediaPipe human clustering progress over a directory. |
+| `GET/POST` | `/api/ai/gemma/status` | Inspects or warms up the local Gemma 4 E2B multimodal server. |
+| `POST` | `/api/ai/gemma/chat` | Streams multi-image conversational replies from local Gemma 4 E2B. |
+| `POST` | `/api/ai/gemma/caption` | Batch-captions selected or remote images with Gemma 4 (`concise`, `detailed`, `structured`, `alt_text`). |
+| `POST` | `/api/ai/gemma/disk-caption` | Scans a server directory and streams batch captions + optional `.txt` sidecar files. |
+| `POST` | `/api/ai/gemma/export-zip` | Exports generated captions as JSON, CSV, Markdown, and `.txt` sidecars in a `.zip`. |
 | `GET` | `/view-image` | Renders the standalone full-resolution image viewer page. |
 | `GET` | `/api/export-full-project` | Packages the entire Next.js 16 source tree as a downloadable `.zip`. |
 

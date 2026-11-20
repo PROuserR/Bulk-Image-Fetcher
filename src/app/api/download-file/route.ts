@@ -1,10 +1,9 @@
 import { NextRequest } from 'next/server';
 import { extractBestImageFromDetailPage } from '@/utils/htmlExtractor';
 import {
-  DEFAULT_USER_AGENT,
-  HTML_ACCEPT_HEADER,
   sanitizeDownloadFilename,
   resolveImageBufferWithFallbacks,
+  fetchDetailPageHtmlSmart,
 } from '@/server/fetchHelpers';
 
 export const runtime = 'nodejs';
@@ -20,7 +19,7 @@ export async function GET(req: NextRequest) {
 
     const cleanFilename = sanitizeDownloadFilename(sp.get('filename') || undefined, imageUrl);
     const explicitReferer = sp.get('referer') || '';
-    const relayUrl = sp.get('relayUrl') || '';
+    const relayUrl = sp.get('relayUrl') || sp.get('relay') || '';
     const fallbackUrl = sp.get('fallbackUrl') || '';
     const linkedPageUrl = sp.get('linkedPageUrl') || '';
 
@@ -31,13 +30,12 @@ export async function GET(req: NextRequest) {
       fallbackUrl,
       linkedPageUrl,
       resolveDetailPageUrl: async (detailUrl) => {
-        const subResp = await fetch(detailUrl, {
-          headers: { 'User-Agent': DEFAULT_USER_AGENT, Accept: HTML_ACCEPT_HEADER },
-          signal: AbortSignal.timeout(7000),
+        const subResp = await fetchDetailPageHtmlSmart(detailUrl, {
+          relayUrl: relayUrl && detailUrl.includes(relayUrl) ? '' : relayUrl,
+          timeoutMs: 9000,
         });
         if (!subResp.ok) return null;
-        const subHtml = await subResp.text();
-        return extractBestImageFromDetailPage(subHtml, subResp.url || detailUrl)?.url || null;
+        return extractBestImageFromDetailPage(subResp.html, subResp.url || detailUrl)?.url || null;
       },
     });
 

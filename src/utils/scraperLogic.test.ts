@@ -268,3 +268,25 @@ test('filterScrapedImages supports stacking full masters, previewable (no blanks
     ['1']
   );
 });
+
+test('unshrinkImageUrl and extractDimensionsFromUrl handle dimension-segmented album storage CDNs', async () => {
+  const { extractDimensionsFromUrl } = await import('./scraperLogic');
+  const smallThumb =
+    'https://pics-storage-1.gallery-cdn.example/contents/albums/main/200x150/30000/30560/1556864.jpg';
+  const unshrunk = unshrinkImageUrl(smallThumb);
+  assert.equal(unshrunk.isUnshrunk, true);
+  assert.equal(
+    unshrunk.fullUrl,
+    'https://pics-storage-1.gallery-cdn.example/contents/albums/main/1920x1080/30000/30560/1556864.jpg'
+  );
+  assert.equal(isLowResUrl(smallThumb), true);
+  assert.equal(isLowResUrl(unshrunk.fullUrl), false);
+
+  // Already 1920x1080 stays untouched and classifies as HD master
+  const alreadyHd = unshrinkImageUrl(unshrunk.fullUrl);
+  assert.equal(alreadyHd.isUnshrunk, false);
+  assert.equal(alreadyHd.fullUrl, unshrunk.fullUrl);
+  assert.deepEqual(extractDimensionsFromUrl(unshrunk.fullUrl), { width: 1920, height: 1080 });
+  assert.equal(isMasterImage({ fullUrl: unshrunk.fullUrl }), true);
+});
+

@@ -54,6 +54,9 @@ export interface HumanImageBiometricProfile {
   biometricSignature: string;
   batchLocalGroupHint?: string;
   confidence: number;
+  faceEmbedding?: number[];
+  faceGeometryVector?: number[];
+  bodyVector?: number[];
 }
 
 export interface RawClusterAssignment {

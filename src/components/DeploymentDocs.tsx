@@ -66,7 +66,10 @@ export const DeploymentDocs: React.FC = () => {
               <button
                 type="button"
                 onClick={() =>
-                  copyToClipboard('npm install\nnpm run dev', 'dev')
+                  copyToClipboard(
+                    'npm install\npython3 -m venv .venv && .venv/bin/pip install -r python/requirements.txt\nnpm run dev',
+                    'dev'
+                  )
                 }
                 className="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
                 title="Copy commands"
@@ -76,11 +79,12 @@ export const DeploymentDocs: React.FC = () => {
               </button>
             </div>
             <p className="text-xs text-zinc-600 dark:text-zinc-400">
-              Install npm packages and start the unified Next.js 16 full-stack server on port 3000:
+              Install npm packages, bootstrap the offline Python AI environment, and launch Next.js 16 on port 3000:
             </p>
             <div className="bg-[#0B0C10] border border-zinc-800 text-zinc-100 p-3.5 rounded-lg font-mono text-xs leading-relaxed overflow-x-auto">
               <code>
                 npm install<br />
+                python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r python/requirements.txt<br />
                 npm run dev<br />
                 # Open http://localhost:3000
               </code>

@@ -6,6 +6,7 @@ import {
   detectFormat,
   extractFilename,
   classifyResolution,
+  extractDimensionsFromUrl,
 } from './scraperLogic.ts';
 import {
   extractInstagramMediaFromJson,
@@ -58,8 +59,10 @@ export function extractImagesFromHtml(html: string, pageUrl: string): Extraction
 
   const $ = cheerio.load(html);
   const pageTitle = $('title').first().text().trim() || pageUrl;
+  const isCustomLocalPaste =
+    /^https?:\/\/custom-(?:page|html-snippet)\.local/i.test(pageUrl);
   const baseUrl =
-    /\.local/i.test(pageUrl) && (/imagefap\.com/i.test(html) || /\/photo\/[0-9]{5,14}/i.test(html))
+    isCustomLocalPaste && (/imagefap\.com/i.test(html) || /\/photo\/[0-9]{5,14}/i.test(html))
       ? 'https://www.imagefap.com/'
       : pageUrl;
 
@@ -67,6 +70,52 @@ export function extractImagesFromHtml(html: string, pageUrl: string): Extraction
   const seenUrls = new Set<string>();
 
   let idCounter = 1;
+
+  const currentAlbumId =
+    (pageUrl.match(/\/(?:albums?|galleries|gallery|pictures)\/([0-9]+)(?:\/|$|\?)/i) || [])[1] ||
+    (pageUrl.match(/[?&]gid=([0-9]+)/i) || [])[1] ||
+    '';
+
+  function isRelatedOrNonPhotoLink(href: string, $link: cheerio.Cheerio<any>): boolean {
+    if (!href) return false;
+    let resolvedHref = href;
+    try {
+      resolvedHref = new URL(href, baseUrl).href;
+    } catch {}
+    const pathLower = resolvedHref.split('?')[0].toLowerCase();
+
+    // Direct image links are never "related webpage" noise unless inside an explicit related-albums/videos block
+    const inRelatedBlock =
+      $link.closest(
+        '[class*="related" i], [id*="related" i], [class*="recommend" i], [class*="similar" i], header, nav, footer'
+      ).length > 0;
+    const isDirectImgHref = /\.(?:jpg|jpeg|png|webp|avif|gif|svg)$/i.test(pathLower);
+
+    if (inRelatedBlock && !isDirectImgHref) return true;
+
+    if (!isDirectImgHref) {
+      if (
+        /\/(?:videos?|watch|movies?|clips?|tags?|categor(?:y|ies)|search|models?|pornstars?|actors?|channels?|studios?|users?|profiles?|members?|login|signup)(?:\/|$)/i.test(
+          pathLower
+        )
+      ) {
+        return true;
+      }
+
+      if (currentAlbumId) {
+        const linkedAlbumMatch = pathLower.match(
+          /\/(?:albums?|galleries|gallery|pictures)\/([0-9]+)(?:\/|$)/i
+        );
+        if (linkedAlbumMatch && linkedAlbumMatch[1] !== currentAlbumId) {
+          return true;
+        }
+      }
+    } else if (inRelatedBlock && currentAlbumId && !resolvedHref.includes(`/${currentAlbumId}/`)) {
+      return true;
+    }
+
+    return false;
+  }
 
   function addImage(candidate: {
     thumb: string;
@@ -128,15 +177,28 @@ export function extractImagesFromHtml(html: string, pageUrl: string): Extraction
     if (seenUrls.has(resolvedFull)) return;
     seenUrls.add(resolvedFull);
 
+    // Infer dimensions from full-res URL path if missing or if fullUrl encodes larger master dimensions than thumb
+    const urlDims = extractDimensionsFromUrl(resolvedFull);
+    let effectiveWidth = candidate.width;
+    let effectiveHeight = candidate.height;
+    if (urlDims.width && urlDims.height) {
+      const urlArea = urlDims.width * urlDims.height;
+      const candArea = (effectiveWidth || 0) * (effectiveHeight || 0);
+      if (!effectiveWidth || !effectiveHeight || (candidate.isUnshrunk && urlArea > candArea)) {
+        effectiveWidth = urlDims.width;
+        effectiveHeight = urlDims.height;
+      }
+    }
+
     const format = detectFormat(resolvedFull);
     const filename = extractFilename(resolvedFull, idCounter - 1, format);
-    const resolutionTier = classifyResolution(candidate.width, candidate.height);
+    const resolutionTier = classifyResolution(effectiveWidth, effectiveHeight);
 
     let aspectRatio: string | undefined = undefined;
-    if (candidate.width && candidate.height) {
+    if (effectiveWidth && effectiveHeight) {
       const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
-      const divisor = gcd(candidate.width, candidate.height);
-      aspectRatio = `${candidate.width / divisor}:${candidate.height / divisor}`;
+      const divisor = gcd(effectiveWidth, effectiveHeight);
+      aspectRatio = `${effectiveWidth / divisor}:${effectiveHeight / divisor}`;
     }
 
     foundImages.push({
@@ -147,8 +209,8 @@ export function extractImagesFromHtml(html: string, pageUrl: string): Extraction
       unshrinkMethod: candidate.method,
       altText: candidate.alt || filename,
       format,
-      width: candidate.width,
-      height: candidate.height,
+      width: effectiveWidth,
+      height: effectiveHeight,
       aspectRatio,
       resolutionTier,
       filename,
@@ -171,6 +233,10 @@ export function extractImagesFromHtml(html: string, pageUrl: string): Extraction
       $img.attr('data-large') ||
       $img.attr('data-max') ||
       $img.attr('data-src') ||
+      $img.attr('data-lazy-src') ||
+      $img.attr('data-webp') ||
+      $img.attr('data-thumb') ||
+      $img.attr('data-image') ||
       $img.attr('data-desktop-src') ||
       $img.attr('data-orig-file') ||
       '';
@@ -183,7 +249,23 @@ export function extractImagesFromHtml(html: string, pageUrl: string): Extraction
     // Check if image is wrapped in an anchor:
     // It can either point to a direct image file OR to a detail webpage!
     const $parentLink = $img.closest('a');
-    let parentHref = $parentLink.attr('href') || '';
+    if ($parentLink.length > 0 && isRelatedOrNonPhotoLink($parentLink.attr('href') || '', $parentLink)) {
+      return;
+    }
+    const rawHref = $parentLink.attr('href') || '';
+    const anchorDataTarget =
+      $parentLink.attr('data-src') ||
+      $parentLink.attr('data-href') ||
+      $parentLink.attr('data-fancybox-href') ||
+      $parentLink.attr('data-lg-src') ||
+      $parentLink.attr('data-pswp-src') ||
+      $parentLink.attr('data-image') ||
+      $parentLink.attr('data-full') ||
+      '';
+    const parentHref =
+      rawHref && !rawHref.startsWith('#') && !rawHref.startsWith('javascript:')
+        ? rawHref
+        : anchorDataTarget;
     const parentOriginal =
       $parentLink.attr('original') ||
       $parentLink.attr('data-original-url') ||
@@ -205,9 +287,9 @@ export function extractImagesFromHtml(html: string, pageUrl: string): Extraction
     let isAnchorImage = false;
     let linkedPageUrl: string | undefined = undefined;
 
-    if (parentHref) {
-      const lower = parentHref.toLowerCase().split('?')[0];
-      if (
+    const isDirectImageUrl = (candidate: string) => {
+      const lower = candidate.toLowerCase().split('?')[0];
+      return (
         lower.endsWith('.jpg') ||
         lower.endsWith('.jpeg') ||
         lower.endsWith('.png') ||
@@ -215,7 +297,13 @@ export function extractImagesFromHtml(html: string, pageUrl: string): Extraction
         lower.endsWith('.avif') ||
         lower.endsWith('.gif') ||
         lower.endsWith('.svg')
-      ) {
+      );
+    };
+
+    if (anchorDataTarget && isDirectImageUrl(anchorDataTarget)) {
+      isAnchorImage = true;
+    } else if (parentHref) {
+      if (isDirectImageUrl(parentHref)) {
         isAnchorImage = true;
       } else if (!parentHref.startsWith('#') && !parentHref.startsWith('javascript:')) {
         // Points to a linked detail webpage!
@@ -223,11 +311,20 @@ export function extractImagesFromHtml(html: string, pageUrl: string): Extraction
       }
     }
 
+    const isPlaceholderSrc = (val: string) =>
+      !val ||
+      (val.startsWith('data:') && val.length < 250) ||
+      /(\/img\/z\.gif|spacer\.gif|blank\.gif|pixel\.gif|ajax-loader\.gif|\/captcha)/i.test(val);
+
     // Check srcset first
     const bestSrcset = parseHighestSrcset(srcset, baseUrl);
 
-    // Determine candidate thumb and full
-    const thumbCandidate = rawSrc || dataSrc;
+    // Determine candidate thumb and full (skip placeholder src if real dataSrc/parentOriginal exists)
+    const thumbCandidate =
+      (!isPlaceholderSrc(rawSrc) ? rawSrc : '') ||
+      dataSrc ||
+      parentOriginal ||
+      rawSrc;
     let fullCandidate = thumbCandidate;
     let isUnshrunk = false;
     let method = 'Direct <img> src';
@@ -237,7 +334,7 @@ export function extractImagesFromHtml(html: string, pageUrl: string): Extraction
       isUnshrunk = true;
       method = `Enclosing Master Asset${parentWidth && parentHeight ? ` (${parentWidth}×${parentHeight})` : ''}`;
     } else if (isAnchorImage) {
-      fullCandidate = parentHref;
+      fullCandidate = anchorDataTarget && isDirectImageUrl(anchorDataTarget) ? anchorDataTarget : parentHref;
       isUnshrunk = true;
       method = 'Enclosing Lightbox Link (<a> href)';
     } else if (bestSrcset && bestSrcset.url) {
@@ -353,10 +450,18 @@ export function extractImagesFromHtml(html: string, pageUrl: string): Extraction
     }
   });
 
-  // 3. Process standalone high-res image links: <a href="...photo.jpg">
-  $('a[href]').each((_, aEl) => {
-    const href = $(aEl).attr('href') || '';
-    const lower = href.toLowerCase().split('?')[0];
+  // 3. Process standalone high-res image links & lightbox data-src anchors: <a href="...photo.jpg">
+  $('a[href], a[data-src], a[data-fancybox-href], [data-fancybox][data-src]').each((_, aEl) => {
+    const $a = $(aEl);
+    if (isRelatedOrNonPhotoLink($a.attr('href') || '', $a)) return;
+    const candidateHref =
+      $a.attr('data-src') ||
+      $a.attr('data-fancybox-href') ||
+      $a.attr('data-lg-src') ||
+      $a.attr('data-pswp-src') ||
+      $a.attr('href') ||
+      '';
+    const lower = candidateHref.toLowerCase().split('?')[0];
     if (
       lower.endsWith('.jpg') ||
       lower.endsWith('.jpeg') ||
@@ -364,17 +469,72 @@ export function extractImagesFromHtml(html: string, pageUrl: string): Extraction
       lower.endsWith('.webp') ||
       lower.endsWith('.avif')
     ) {
-      const text = $(aEl).text().trim() || 'Standalone image link';
-      const unshrink = unshrinkImageUrl(href);
+      const childThumb =
+        $a.find('img').first().attr('data-original') ||
+        $a.find('img').first().attr('data-src') ||
+        $a.find('img').first().attr('src') ||
+        '';
+      const text = $a.attr('title') || $a.find('img').first().attr('alt') || $a.text().trim() || 'Standalone image link';
+      const unshrink = unshrinkImageUrl(candidateHref);
       addImage({
-        thumb: unshrink.fullUrl,
+        thumb: childThumb || unshrink.fullUrl,
         full: unshrink.fullUrl,
-        isUnshrunk: unshrink.isUnshrunk,
+        isUnshrunk: unshrink.isUnshrunk || Boolean(childThumb && childThumb !== unshrink.fullUrl),
         method: unshrink.isUnshrunk ? unshrink.method : 'Direct Image Link',
         alt: text,
         context: 'Hyperlink <a>',
       });
     }
+  });
+
+  // 3.5. Structured JSON-LD gallery / image objects
+  $('script[type="application/ld+json"]').each((_, el) => {
+    try {
+      const rawJson = $(el).text();
+      if (!rawJson) return;
+      const parsed = JSON.parse(rawJson);
+      const queue = Array.isArray(parsed) ? [...parsed] : [parsed];
+      while (queue.length > 0) {
+        const node = queue.shift();
+        if (!node || typeof node !== 'object') continue;
+        if (Array.isArray(node['@graph'])) queue.push(...node['@graph']);
+        if (Array.isArray(node.associatedMedia)) queue.push(...node.associatedMedia);
+        if (Array.isArray(node.image)) {
+          for (const item of node.image) {
+            if (typeof item === 'string') {
+              const u = unshrinkImageUrl(item);
+              addImage({
+                thumb: u.fullUrl,
+                full: u.fullUrl,
+                isUnshrunk: u.isUnshrunk,
+                method: 'JSON-LD Image Gallery',
+                alt: node.name || pageTitle,
+                context: 'JSON-LD',
+              });
+            } else if (item && typeof item === 'object') {
+              queue.push(item);
+            }
+          }
+        }
+        const candidate =
+          node.contentUrl ||
+          (typeof node.image === 'string' ? node.image : node.image?.url) ||
+          (node['@type'] === 'ImageObject' ? node.url : '');
+        if (candidate && typeof candidate === 'string' && !/logo|favicon/i.test(candidate)) {
+          const u = unshrinkImageUrl(candidate);
+          addImage({
+            thumb: node.thumbnailUrl || u.fullUrl,
+            full: u.fullUrl,
+            isUnshrunk: u.isUnshrunk || Boolean(node.thumbnailUrl && node.thumbnailUrl !== u.fullUrl),
+            method: 'JSON-LD ImageObject',
+            alt: node.name || node.caption || pageTitle,
+            width: typeof node.width === 'number' ? node.width : undefined,
+            height: typeof node.height === 'number' ? node.height : undefined,
+            context: 'JSON-LD',
+          });
+        }
+      }
+    } catch {}
   });
 
   // 4. Meta tags: og:image, twitter:image
@@ -420,6 +580,13 @@ export interface GalleryMapItem {
   height?: number;
 }
 
+function unescapeRawHtmlUrls(raw: string): string {
+  return raw
+    .replace(/\\\//g, '/')
+    .replace(/\\u0026/gi, '&')
+    .replace(/&amp;/g, '&');
+}
+
 /**
  * Extracts a map of photo IDs to full-sized master URLs and dimensions from a gallery or detail webpage.
  */
@@ -438,18 +605,49 @@ export function extractGalleryMapFromDetailPage(
   }
   const $ = cheerio.load(html);
 
-  $('a[original], a[href*="/images/full/"], a[imageid], [data-full-url], [data-original-url]').each((_, el) => {
-    const $a = $(el);
+  const upsertMapEntry = (id: string, fullUrl: string, width?: number, height?: number) => {
+    const existing = galleryMap.get(id);
+    if (!existing) {
+      galleryMap.set(id, { fullUrl, width, height });
+      return;
+    }
+    const existingSigned = existing.fullUrl.includes('secure=');
+    const nextSigned = fullUrl.includes('secure=');
+    const nextIsFull = fullUrl.includes('/images/full/');
+    const existingIsFull = existing.fullUrl.includes('/images/full/');
+
+    const shouldReplaceUrl =
+      (nextSigned && !existingSigned) ||
+      (nextIsFull && !existingIsFull && nextSigned === existingSigned);
+
+    galleryMap.set(id, {
+      fullUrl: shouldReplaceUrl ? fullUrl : existing.fullUrl,
+      width: existing.width || width,
+      height: existing.height || height,
+    });
+  };
+
+  $(
+    'a[original], a[href*="/images/full/"], a[imageid], [data-full-url], [data-original-url], img#mainPhoto, a#mainPhotoLink, img.exppic, div#cnt_main img, ul.thumbs a, noscript img'
+  ).each((_, el) => {
+    const $el = $(el);
     const fullCandidate =
-      $a.attr('original') ||
-      $a.attr('data-full-url') ||
-      $a.attr('data-original-url') ||
-      $a.attr('href') ||
+      $el.attr('original') ||
+      $el.attr('data-full-url') ||
+      $el.attr('data-original-url') ||
+      $el.attr('data-original') ||
+      $el.attr('data-src') ||
+      $el.attr('src') ||
+      $el.attr('href') ||
       '';
-    const imageId = $a.attr('imageid') || '';
-    const dim = $a.attr('dimension') || '';
-    let width: number | undefined;
-    let height: number | undefined;
+    const imageId =
+      $el.attr('imageid') ||
+      $el.attr('data-imageid') ||
+      (($el.attr('href') || '').match(/\/photo\/([0-9]{5,14})/i) || [])[1] ||
+      '';
+    const dim = $el.attr('dimension') || '';
+    let width: number | undefined = parseInt($el.attr('width') || '', 10) || undefined;
+    let height: number | undefined = parseInt($el.attr('height') || '', 10) || undefined;
 
     if (dim && dim.includes('x')) {
       const parts = dim.split('x');
@@ -461,7 +659,13 @@ export function extractGalleryMapFromDetailPage(
       }
     }
 
-    if (fullCandidate && !fullCandidate.includes('z.gif') && !fullCandidate.includes('spacer.gif')) {
+    if (
+      fullCandidate &&
+      !fullCandidate.includes('z.gif') &&
+      !fullCandidate.includes('spacer.gif') &&
+      !fullCandidate.includes('blank.gif') &&
+      (fullCandidate.includes('/images/full/') || $el.attr('original') || $el.attr('data-full-url') || $el.attr('data-original-url'))
+    ) {
       let resolvedFull = fullCandidate;
       try {
         resolvedFull = new URL(fullCandidate, pageUrl).href;
@@ -473,11 +677,7 @@ export function extractGalleryMapFromDetailPage(
         (resolvedFull.match(/[?&]id=([0-9]{5,14})/i) || [])[1];
 
       if (idMatch) {
-        galleryMap.set(idMatch, {
-          fullUrl: resolvedFull,
-          width,
-          height,
-        });
+        upsertMapEntry(idMatch, resolvedFull, width, height);
       }
     }
   });
@@ -493,26 +693,31 @@ export function extractGalleryMapFromDetailPage(
         const candidate = node?.contentUrl || (typeof node?.image === 'string' ? node.image : node?.image?.url);
         if (candidate && typeof candidate === 'string') {
           const idMatch = (candidate.match(/\/([0-9]{5,14})\.(?:jpg|jpeg|png|webp|avif)/i) || [])[1];
-          if (idMatch && !galleryMap.has(idMatch)) {
-            galleryMap.set(idMatch, {
-              fullUrl: new URL(candidate, pageUrl).href,
-              width: typeof node?.width === 'number' ? node.width : undefined,
-              height: typeof node?.height === 'number' ? node.height : undefined,
-            });
+          if (idMatch) {
+            upsertMapEntry(
+              idMatch,
+              new URL(candidate, pageUrl).href,
+              typeof node?.width === 'number' ? node.width : undefined,
+              typeof node?.height === 'number' ? node.height : undefined
+            );
           }
         }
       }
     } catch {}
   });
 
-  // Also scan raw HTML/scripts for CDN /images/full/ master URLs (e.g. ImageFap filmstrip JSON)
-  const fullCdnMatches = html.match(/https?:\/\/[^"'\s<>\\]+\/images\/full\/[0-9a-zA-Z/_-]+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"'\s<>\\]*)?/gi);
+  // Also scan raw/unescaped HTML & inline scripts for CDN /images/full/ and /contents/albums/ master URLs
+  const normalizedHtml = unescapeRawHtmlUrls(html);
+  const fullCdnMatches = normalizedHtml.match(
+    /https?:\/\/[^"'\s<>\\]+\/(?:images\/full|contents\/albums\/(?:sources|main\/(?:1920x1080|2560x1440|3840x2160|[0-9]{4}x[0-9]{3,4})))\/[0-9a-zA-Z/_-]+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"'\s<>\\]*)?/gi
+  );
   if (fullCdnMatches) {
     for (const rawMatch of fullCdnMatches) {
       const cleanUrl = rawMatch.replace(/&amp;/g, '&');
       const idMatch = (cleanUrl.match(/\/([0-9]{5,14})\.(?:jpg|jpeg|png|webp|avif)/i) || [])[1];
-      if (idMatch && !galleryMap.has(idMatch)) {
-        galleryMap.set(idMatch, { fullUrl: cleanUrl });
+      if (idMatch) {
+        const dims = extractDimensionsFromUrl(cleanUrl);
+        upsertMapEntry(idMatch, cleanUrl, dims.width, dims.height);
       }
     }
   }
@@ -538,20 +743,30 @@ export function extractBestImageFromDetailPage(
   }
   const $ = cheerio.load(html);
 
-  // Extract target photo ID from pageUrl (e.g. /photo/1109704572/ or ?id=1109704572)
-  const targetId = (pageUrl.match(/\/photo\/([0-9]+)/i) || [])[1] || (pageUrl.match(/[?&]id=([0-9]+)/i) || [])[1];
+  // Extract target photo ID from pageUrl (e.g. /photo/1109704572/, ?id=1109704572, or /albums/30560/slug/1556864/)
+  const targetId =
+    (pageUrl.match(/\/photo\/([0-9]+)/i) || [])[1] ||
+    (pageUrl.match(/[?&]id=([0-9]+)/i) || [])[1] ||
+    (pageUrl.match(/\/albums?\/[0-9]+\/[^/]+\/([0-9]{4,14})(?:\/|$|\?)/i) || [])[1];
 
   // 1. Check for specific image ID match in gallery strip / anchors with original attribute or full URL
   if (targetId) {
     let matchedItem: { url: string; width?: number; height?: number } | null = null;
-    $('a[original], a[href*="/images/full/"], a[imageid], img[src*="/images/full/"]').each((_, aEl) => {
+    $(
+      'a[original], a[href*="/images/full/"], a[href*="/contents/albums/"], a[imageid], [data-full-url], [data-original-url], a#mainPhotoLink, img[src*="/images/full/"], img[src*="/contents/albums/"], img[data-src*="/images/full/"], img[data-original*="/images/full/"]'
+    ).each((_, aEl) => {
       const $el = $(aEl);
-      const id = $el.attr('imageid') || '';
+      const id = $el.attr('imageid') || $el.attr('data-imageid') || '';
       const href = $el.attr('href') || '';
-      const src = $el.attr('src') || '';
-      const orig = $el.attr('original') || '';
+      const src = $el.attr('data-original') || $el.attr('data-src') || $el.attr('src') || '';
+      const orig =
+        $el.attr('original') ||
+        $el.attr('data-original-url') ||
+        $el.attr('data-full-url') ||
+        '';
       if (id === targetId || href.includes(targetId) || orig.includes(targetId) || src.includes(targetId)) {
-        const fullCandidate = orig || src || href;
+        const fullCandidate = orig || (src.includes('/images/full/') ? src : '') || href;
+        if (!fullCandidate || /z\.gif|spacer\.gif|blank\.gif/i.test(fullCandidate)) return;
         const dim = $el.attr('dimension') || '';
         let w: number | undefined = parseInt($el.attr('width') || '', 10) || undefined;
         let h: number | undefined = parseInt($el.attr('height') || '', 10) || undefined;
@@ -565,12 +780,22 @@ export function extractBestImageFromDetailPage(
           }
         }
         try {
-          matchedItem = {
-            url: new URL(fullCandidate, pageUrl).href,
-            width: w,
-            height: h,
-          };
-          return false; // break
+          const nextUrl = new URL(fullCandidate, pageUrl).href;
+          // Keep scanning if we haven't found a signed /images/full/ master yet and another element might have it
+          if (
+            !matchedItem ||
+            (nextUrl.includes('/images/full/') && !matchedItem.url.includes('/images/full/')) ||
+            (nextUrl.includes('secure=') && !matchedItem.url.includes('secure='))
+          ) {
+            matchedItem = {
+              url: nextUrl,
+              width: w,
+              height: h,
+            };
+          }
+          if (matchedItem.url.includes('/images/full/') && matchedItem.url.includes('secure=')) {
+            return false; // break
+          }
         } catch {}
       }
     });
@@ -590,16 +815,32 @@ export function extractBestImageFromDetailPage(
     }
   }
 
-  // 2. Check for main photo element (#mainPhoto, #mainImg, img.mainPhoto)
-  const $mainPhoto = $('#mainPhoto, #mainImg, img.mainPhoto, img.main-image, img[itemprop="contentUrl"]').first();
+  // 2. Check for main photo element (#mainPhoto, #mainImg, img.mainPhoto, img.exppic, div#cnt_main img)
+  const $mainPhoto = $(
+    '#mainPhoto, #mainImg, img.mainPhoto, img.exppic, img.main-image, div#cnt_main img, img[itemprop="contentUrl"]'
+  ).first();
   if ($mainPhoto.length > 0) {
     const parentA = $mainPhoto.closest('a');
-    const parentOriginal = parentA.attr('original') || parentA.attr('href') || '';
+    const parentAttrOrig =
+      parentA.attr('original') ||
+      parentA.attr('data-original-url') ||
+      parentA.attr('data-full-url') ||
+      '';
+    const parentHref = parentA.attr('href') || '';
+    const parentHrefIsImage =
+      /\.(?:jpg|jpeg|png|webp|avif)(?:\?.*)?$/i.test(parentHref) ||
+      /\/images\/(?:full|org|large)\//i.test(parentHref);
     const mainWidth = parseInt($mainPhoto.attr('width') || '', 10);
     const mainHeight = parseInt($mainPhoto.attr('height') || '', 10);
-    const rawSrc = parentOriginal || $mainPhoto.attr('data-src') || $mainPhoto.attr('src') || '';
+    const rawSrc =
+      parentAttrOrig ||
+      (parentHrefIsImage ? parentHref : '') ||
+      $mainPhoto.attr('data-original') ||
+      $mainPhoto.attr('data-src') ||
+      $mainPhoto.attr('src') ||
+      '';
 
-    if (rawSrc && !rawSrc.includes('z.gif') && !rawSrc.includes('spacer.gif')) {
+    if (rawSrc && !rawSrc.includes('z.gif') && !rawSrc.includes('spacer.gif') && !rawSrc.includes('blank.gif')) {
       const unshrink = unshrinkImageUrl(rawSrc);
       try {
         const resolved = new URL(unshrink.fullUrl, pageUrl).href;
@@ -638,14 +879,21 @@ export function extractBestImageFromDetailPage(
   });
   if (ldResult) return ldResult;
 
-  // 2.75. Scan raw HTML/scripts for explicit /images/full/ CDN URL matching targetId
-  const fullCdnMatches = html.match(/https?:\/\/[^"'\s<>\\]+\/images\/full\/[0-9a-zA-Z/_-]+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"'\s<>\\]*)?/gi);
+  // 2.75. Scan raw/unescaped HTML & scripts for explicit /images/full/ or /contents/albums/ CDN URL matching targetId
+  const normalizedHtml = unescapeRawHtmlUrls(html);
+  const fullCdnMatches = normalizedHtml.match(
+    /https?:\/\/[^"'\s<>\\]+\/(?:images\/full|contents\/albums\/(?:sources|main\/(?:1920x1080|2560x1440|3840x2160|[0-9]{4}x[0-9]{3,4})))\/[0-9a-zA-Z/_-]+\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"'\s<>\\]*)?/gi
+  );
   if (fullCdnMatches && fullCdnMatches.length > 0) {
     const preferred =
       (targetId && fullCdnMatches.find((u) => u.includes(targetId))) || fullCdnMatches[0];
     if (preferred) {
+      const clean = preferred.replace(/&amp;/g, '&');
+      const dims = extractDimensionsFromUrl(clean);
       return {
-        url: preferred.replace(/&amp;/g, '&'),
+        url: clean,
+        width: dims.width,
+        height: dims.height,
         method: 'Linked Detail CDN Full Master',
       };
     }

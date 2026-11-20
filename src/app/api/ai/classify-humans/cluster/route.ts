@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  clusterHumanProfilesWithGemini,
-  mapGeminiError,
+  clusterHumanProfilesOffline,
+  mapClassifierError,
 } from '@/server/humanClassifierService';
 import { FolderNamingMode } from '@/utils/humanClassifierLogic';
 
@@ -23,10 +23,10 @@ export async function POST(req: NextRequest) {
     const mode: FolderNamingMode =
       folderNamingMode === 'descriptive' ? 'descriptive' : 'indexed';
 
-    const result = await clusterHumanProfilesWithGemini(profiles, mode);
+    const result = await clusterHumanProfilesOffline(profiles, mode);
     return NextResponse.json(result);
   } catch (err: unknown) {
-    const mapped = mapGeminiError(err);
+    const mapped = mapClassifierError(err);
     return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }
 }

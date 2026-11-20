@@ -5,48 +5,113 @@
 
 export const OPEN_TAB_HARVESTER_SCRIPT = `(async () => {
   const seen = new Set();
-  const anchors = [...document.querySelectorAll('a[href*="/photo/"], a[original]')];
   const entries = [];
-  for (const a of anchors) {
-    const img = a.querySelector('img');
-    const thumb = img?.getAttribute('src') || img?.getAttribute('data-src') || '';
-    const href = a.href || '';
-    const orig = a.getAttribute('original') || '';
-    if ((!href && !orig) || seen.has(href || orig)) continue;
-    seen.add(href || orig);
-    entries.push({ thumb: thumb ? new URL(thumb, location.href).href : '', linkedPageUrl: href, fullUrl: orig, altText: img?.alt || a.title || '' });
+  const collectFromDoc = (doc, baseHref) => {
+    doc.querySelectorAll('a[href*="/photo/"], a[original], a[imageid], a[href*="/contents/albums/"], a[data-fancybox]').forEach((a) => {
+      const img = a.querySelector('img');
+      const thumb = img?.getAttribute('data-original') || img?.getAttribute('data-src') || img?.getAttribute('src') || '';
+      const rawHref = a.getAttribute('href') || a.getAttribute('data-src') || '';
+      const href = rawHref ? new URL(rawHref, baseHref).href : '';
+      const orig = a.getAttribute('original') || a.getAttribute('data-full-url') || (/\/contents\/albums\/.*\.(?:jpg|jpeg|png|webp|avif)/i.test(href) ? href : '');
+      const id = a.getAttribute('imageid') || (href.match(/\/photo\/(\d+)/i) || [])[1] || (orig.match(/\/(\d{4,14})\.(?:jpg|jpeg|png|webp|avif)/i) || [])[1] || '';
+      const key = id ? 'id:' + id : (href || orig);
+      if ((!href && !orig) || seen.has(key)) return;
+      seen.add(key);
+      entries.push({
+        id,
+        thumb: thumb && !/blank\.gif|z\.gif|spacer\.gif/i.test(thumb) ? new URL(thumb, baseHref).href : '',
+        linkedPageUrl: orig && href === orig ? '' : href,
+        fullUrl: orig ? new URL(orig, baseHref).href : '',
+        altText: img?.alt || a.title || '',
+      });
+    });
+  };
+  collectFromDoc(document, location.href);
+  const currentGid = (location.href.match(/[?&]gid=(\\d+)|\\/pictures\\/(\\d+)/i) || []).slice(1).find(Boolean);
+  const pageQueue = new Map();
+  if (/imagefap\\.com/i.test(location.hostname) && !location.search.includes('view=2') && /\\/(pictures|gallery)/i.test(location.pathname)) {
+    const view2Url = new URL(location.href);
+    view2Url.searchParams.set('view', '2');
+    pageQueue.set(-1, view2Url.href);
+  }
+  const discoverPages = (doc, baseHref) => {
+    doc.querySelectorAll('a[href*="page="]').forEach((a) => {
+      const h = a.getAttribute('href') || '';
+      if (!h || h.includes('/photo/')) return;
+      try {
+        const u = new URL(h, baseHref);
+        const linkGid = (u.href.match(/[?&]gid=(\\d+)|\\/pictures\\/(\\d+)/i) || []).slice(1).find(Boolean);
+        if (currentGid && linkGid && currentGid !== linkGid) return;
+        const p = parseInt(u.searchParams.get('page') || '', 10);
+        if (!isNaN(p) && p >= 0 && u.href !== location.href && !pageQueue.has(p)) {
+          if (!u.searchParams.has('view')) u.searchParams.set('view', '2');
+          pageQueue.set(p, u.href);
+        }
+      } catch {}
+    });
+  };
+  discoverPages(document, location.href);
+  for (const [, pUrl] of [...pageQueue.entries()].sort((a, b) => a[0] - b[0]).slice(0, 25)) {
+    try {
+      const pHtml = await (await fetch(pUrl, { credentials: 'include' })).text();
+      const pDoc = new DOMParser().parseFromString(pHtml, 'text/html');
+      collectFromDoc(pDoc, pUrl);
+      discoverPages(pDoc, pUrl);
+    } catch {}
   }
   const map = new Map();
+  const applyMap = () => {
+    for (const item of entries) {
+      const id = item.id || (item.linkedPageUrl.match(/\\/photo\\/(\\d+)/) || [])[1];
+      if (id && map.has(id)) {
+        const m = map.get(id);
+        if (!item.fullUrl || (m.fullUrl.includes('secure=') && !item.fullUrl.includes('secure='))) {
+          Object.assign(item, m);
+        }
+      }
+    }
+  };
   const crawl = async (item) => {
-    if (!item.linkedPageUrl || item.fullUrl.includes('/images/full/')) return;
+    if (!item.linkedPageUrl || (item.fullUrl.includes('/images/full/') && item.fullUrl.includes('secure='))) return;
     try {
-      const html = await (await fetch(item.linkedPageUrl, { credentials: 'include' })).text();
-      const doc = new DOMParser().parseFromString(html, 'text/html');
-      doc.querySelectorAll('a[original], a[href*="/images/full/"], a[imageid]').forEach((el) => {
-        const u = el.getAttribute('original') || el.getAttribute('href') || '';
-        const id = el.getAttribute('imageid') || (u.match(/\\/(\\d{6,14})\\.(?:jpg|jpeg|png|webp)/i) || [])[1];
+      const rawHtml = await (await fetch(item.linkedPageUrl, { credentials: 'include' })).text();
+      const unescapedHtml = rawHtml.replace(/\\\\\\//g, '/').replace(/\\\\u0026/gi, '&').replace(/&amp;/g, '&');
+      const doc = new DOMParser().parseFromString(rawHtml, 'text/html');
+      doc.querySelectorAll('a[original], a[href*="/images/full/"], a[imageid], img#mainPhoto, img.exppic').forEach((el) => {
+        const u = el.getAttribute('original') || el.getAttribute('data-full-url') || el.getAttribute('src') || el.getAttribute('href') || '';
+        const id = el.getAttribute('imageid') || (u.match(/\\/(\\d{6,14})\\.(?:jpg|jpeg|png|webp|avif)/i) || [])[1];
         const dim = (el.getAttribute('dimension') || '').split('x');
-        if (id && u.includes('/images/full/')) map.set(id, { fullUrl: new URL(u, item.linkedPageUrl).href, width: +dim[0] || undefined, height: +dim[1] || undefined });
+        if (id && u.includes('/images/full/')) {
+          map.set(id, { fullUrl: new URL(u, item.linkedPageUrl).href, width: +dim[0] || +el.getAttribute('width') || undefined, height: +dim[1] || +el.getAttribute('height') || undefined });
+        }
       });
       doc.querySelectorAll('script[type="application/ld+json"]').forEach((s) => {
         try {
           const j = JSON.parse(s.textContent || '{}');
           const c = j.contentUrl || (typeof j.image === 'string' ? j.image : j.image?.url);
-          const id = (item.linkedPageUrl.match(/\\/photo\\/(\\d+)/) || [])[1];
+          const id = (c && (c.match(/\\/(\\d{6,14})\\./) || [])[1]) || (item.linkedPageUrl.match(/\\/photo\\/(\\d+)/) || [])[1];
           if (c && id && !map.has(id)) map.set(id, { fullUrl: new URL(c, item.linkedPageUrl).href, width: +j.width || undefined, height: +j.height || undefined });
         } catch {}
       });
-      const id = (item.linkedPageUrl.match(/\\/photo\\/(\\d+)/) || [])[1];
-      if (id && map.has(id)) {
-        Object.assign(item, map.get(id));
-      } else {
-        const m = html.match(/https?:\\/\\/[^"'\\s<>]+\\/images\\/full\\/[0-9a-zA-Z\\/_-]+\\.(?:jpg|jpeg|png|webp|avif)(?:\\?[^"'\\s<>]*)?/i);
-        if (m) item.fullUrl = m[0].replace(/&amp;/g, '&');
+      const cdnMatches = unescapedHtml.match(/https?:\\/\\/[^"'\\s<>\\\\]+\\/images\\/full\\/[0-9a-zA-Z\\/_-]+\\.(?:jpg|jpeg|png|webp|avif)(?:\\?[^"'\\s<>\\\\]*)?/gi) || [];
+      for (const m of cdnMatches) {
+        const mid = (m.match(/\\/(\\d{6,14})\\./) || [])[1];
+        if (mid && (!map.has(mid) || (m.includes('secure=') && !map.get(mid).fullUrl.includes('secure=')))) {
+          map.set(mid, { fullUrl: m });
+        }
       }
+      applyMap();
+      if (!item.fullUrl && cdnMatches[0]) item.fullUrl = cdnMatches[0];
     } catch {}
   };
-  for (let i = 0; i < entries.length; i += 4) {
-    await Promise.all(entries.slice(i, i + 4).map(crawl));
+  for (let s = 0; s < entries.length; s += 20) {
+    if (!(entries[s].fullUrl.includes('/images/full/') && entries[s].fullUrl.includes('secure='))) {
+      await crawl(entries[s]);
+    }
+  }
+  const unresolved = entries.filter((e) => !(e.fullUrl.includes('/images/full/') && e.fullUrl.includes('secure=')));
+  for (let i = 0; i < unresolved.length; i += 4) {
+    await Promise.all(unresolved.slice(i, i + 4).map((e) => crawl(e)));
   }
   const images = entries.map((e, idx) => ({
     id: 'img_' + (idx + 1),
@@ -63,7 +128,7 @@ export const OPEN_TAB_HARVESTER_SCRIPT = `(async () => {
   window.__harvesterPayload = payload;
   if (typeof copy === 'function') copy(payload);
   try { await navigator.clipboard.writeText(payload); } catch {}
-  console.log('Harvested ' + images.length + ' master links. Paste from clipboard or inspect window.__harvesterPayload');
+  console.log('Harvested ' + images.length + ' master links across all gallery pages. Paste from clipboard or inspect window.__harvesterPayload');
 })();`;
 
 export const INSTAGRAM_PROFILE_HARVESTER_SCRIPT = `(async () => {

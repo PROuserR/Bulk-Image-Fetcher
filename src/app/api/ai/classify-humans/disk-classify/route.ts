@@ -3,9 +3,8 @@ import { NextRequest } from 'next/server';
 import { scanDirectoryImages, isWithinRoot } from '@/server/directoryImageService';
 import {
   analyzeHumanImageBatch,
-  buildDiskImageThumbnail,
-  clusterHumanProfilesWithGemini,
-  mapGeminiError,
+  clusterHumanProfilesOffline,
+  mapClassifierError,
 } from '@/server/humanClassifierService';
 import {
   chunkItemsForAnalysis,
@@ -71,36 +70,25 @@ export async function POST(req: NextRequest) {
           images: indexedItems,
         });
 
-        const batches = chunkItemsForAnalysis(indexedItems, 5);
+        const batches = chunkItemsForAnalysis(indexedItems, 10);
         const allProfiles: HumanImageBiometricProfile[] = [];
         let processedCount = 0;
 
-        // Run up to 3 batches concurrently for fast 100+ image throughput
-        const CONCURRENCY = 3;
-        for (let i = 0; i < batches.length; i += CONCURRENCY) {
-          const wave = batches.slice(i, i + CONCURRENCY);
-          const waveResults = await Promise.all(
-            wave.map(async (batch) => {
-              const payloadImages = [];
-              for (const item of batch) {
-                const absPath = path.resolve(resolvedRoot, item.relativePath);
-                if (!isWithinRoot(resolvedRoot, absPath)) continue;
-                const thumb = await buildDiskImageThumbnail(absPath);
-                payloadImages.push({
-                  imageId: item.imageId,
-                  filename: item.filename,
-                  mimeType: thumb.mimeType,
-                  base64Data: thumb.base64Data,
-                });
-              }
-              return analyzeHumanImageBatch(payloadImages);
-            })
-          );
-
-          for (const batchProfiles of waveResults) {
-            allProfiles.push(...batchProfiles);
-            processedCount += batchProfiles.length;
+        for (const batch of batches) {
+          const payloadImages = [];
+          for (const item of batch) {
+            const absPath = path.resolve(resolvedRoot, item.relativePath);
+            if (!isWithinRoot(resolvedRoot, absPath)) continue;
+            payloadImages.push({
+              imageId: item.imageId,
+              filename: item.filename,
+              filePath: absPath,
+            });
           }
+
+          const batchProfiles = await analyzeHumanImageBatch(payloadImages);
+          allProfiles.push(...batchProfiles);
+          processedCount += batchProfiles.length;
 
           send({
             type: 'progress',
@@ -117,7 +105,7 @@ export async function POST(req: NextRequest) {
           total: indexedItems.length,
         });
 
-        const { clusters, manifest } = await clusterHumanProfilesWithGemini(allProfiles, mode);
+        const { clusters, manifest } = await clusterHumanProfilesOffline(allProfiles, mode);
 
         send({
           type: 'done',
@@ -128,7 +116,7 @@ export async function POST(req: NextRequest) {
           manifest,
         });
       } catch (err: unknown) {
-        const mapped = mapGeminiError(err);
+        const mapped = mapClassifierError(err);
         send({ type: 'error', error: mapped.message, status: mapped.status });
       } finally {
         controller.close();

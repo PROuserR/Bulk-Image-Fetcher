@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractBestImageFromDetailPage } from '@/utils/htmlExtractor';
 import {
-  DEFAULT_USER_AGENT,
-  buildRelayTarget,
   isGeoBlockedHtml,
+  fetchDetailPageHtmlSmart,
 } from '@/server/fetchHelpers';
+import { resolveVirtualPresetHtml } from '@/server/galleryScraperService';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,10 +17,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing linkedPageUrl parameter' }, { status: 400 });
     }
 
-    const subResp = await fetch(buildRelayTarget(linkedPageUrl, relayUrl), {
-      headers: { 'User-Agent': DEFAULT_USER_AGENT, Accept: 'text/html,*/*' },
-      signal: AbortSignal.timeout(9000),
-    });
+    const virtualMatch = resolveVirtualPresetHtml(linkedPageUrl);
+    const subResp = virtualMatch
+      ? { ok: true, status: 200, statusText: 'OK', url: virtualMatch.url, html: virtualMatch.html }
+      : await fetchDetailPageHtmlSmart(linkedPageUrl, {
+          relayUrl,
+          timeoutMs: 12000,
+        });
 
     if (!subResp.ok) {
       return NextResponse.json(
@@ -29,8 +32,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const subHtml = await subResp.text();
-    if (isGeoBlockedHtml(subHtml, subResp.url)) {
+    if (isGeoBlockedHtml(subResp.html, subResp.url)) {
       return NextResponse.json(
         {
           geoBlocked: true,
@@ -41,7 +43,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const resolved = extractBestImageFromDetailPage(subHtml, subResp.url || linkedPageUrl);
+    const resolved = extractBestImageFromDetailPage(subResp.html, subResp.url || linkedPageUrl);
     if (!resolved) {
       return NextResponse.json(
         { error: 'Could not extract high-res image from linked detail page' },

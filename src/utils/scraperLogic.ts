@@ -20,6 +20,9 @@ export interface ScrapedImage {
   linkedPageUrl?: string; // Webpage URL linked from the preview image (e.g. /photo/123)
   deepScraped?: boolean;  // Whether master image was resolved from linked detail webpage
   fallbackUrl?: string;   // High-res fallback mirror URL for expired CDN tokens
+  galleryId?: string;     // Child gallery ID when scraped from a nested multi-gallery hub
+  galleryTitle?: string;  // Child gallery title when scraped from a nested multi-gallery hub
+  galleryUrl?: string;    // Child gallery webpage URL
 }
 
 /**
@@ -184,6 +187,24 @@ export function unshrinkImageUrl(url: string): { fullUrl: string; isUnshrunk: bo
     }
   }
 
+  // 10b. Dimension-segmented album storage CDNs:
+  // e.g. /contents/albums/main/200x150/30000/30560/1556864.jpg -> /contents/albums/main/1920x1080/30000/30560/1556864.jpg
+  const albumDimRegex =
+    /(\/contents\/albums\/)(?:main|thumbs?)\/([0-9]{2,4})x([0-9]{2,4})\/(.+\.(?:jpg|jpeg|png|webp|avif))(\?.*)?$/i;
+  const albumDimMatch = cleaned.match(albumDimRegex);
+  if (albumDimMatch) {
+    const w = parseInt(albumDimMatch[2], 10);
+    const h = parseInt(albumDimMatch[3], 10);
+    if (!isNaN(w) && !isNaN(h) && Math.max(w, h) < 1600) {
+      const unshrink = cleaned.replace(albumDimRegex, '$1main/1920x1080/$4$5');
+      return {
+        fullUrl: unshrink,
+        isUnshrunk: true,
+        method: 'Album Storage HD Master (1920×1080)',
+      };
+    }
+  }
+
   // 11. Generic photo gallery thumbnails: /images/thumb/ or /images/preview/ -> /images/full/
   const genericThumbRegex = /\/images\/(thumb|thumbs|mini|preview|small)\/([0-9a-zA-Z_-]+)\.(jpg|jpeg|png|webp|avif)(\?.*)?$/i;
   if (genericThumbRegex.test(cleaned)) {
@@ -192,6 +213,23 @@ export function unshrinkImageUrl(url: string): { fullUrl: string; isUnshrunk: bo
   }
 
   return { fullUrl: cleaned, isUnshrunk: false, method: 'Direct Source' };
+}
+
+/**
+ * Extracts explicit WxH pixel dimensions encoded in CDN URL paths (e.g. /1920x1080/ or /3840x2160/).
+ */
+export function extractDimensionsFromUrl(url?: string): { width?: number; height?: number } {
+  if (!url || typeof url !== 'string') return {};
+  const pathPart = url.split('?')[0];
+  const segMatch = pathPart.match(/\/([1-9][0-9]{2,3})x([1-9][0-9]{2,3})\//);
+  if (segMatch) {
+    const width = parseInt(segMatch[1], 10);
+    const height = parseInt(segMatch[2], 10);
+    if (width >= 50 && height >= 50 && width <= 12000 && height <= 12000) {
+      return { width, height };
+    }
+  }
+  return {};
 }
 
 /**
@@ -261,11 +299,18 @@ export function classifyResolution(width?: number, height?: number): ScrapedImag
  */
 export function isLowResUrl(url?: string): boolean {
   if (!url) return false;
-  return (
+  if (
     /\/(thumb|thumbs|mini|frame-thumb|preview)\//i.test(url) ||
     /[_\-\.](150x150|300x200|160x107)\./i.test(url) ||
     /[?&]w=(160|300|400)(&|$)/i.test(url)
-  );
+  ) {
+    return true;
+  }
+  const pathDims = extractDimensionsFromUrl(url);
+  if (pathDims.width && pathDims.height && Math.max(pathDims.width, pathDims.height) <= 640) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -281,11 +326,13 @@ export function isMasterImage(
   },
   previewInfo?: PreviewStateInfo
 ): boolean {
-  const effectiveWidth = img.width || previewInfo?.naturalWidth;
-  const effectiveHeight = img.height || previewInfo?.naturalHeight;
+  const pathDims = extractDimensionsFromUrl(img.fullUrl);
+  const effectiveWidth = img.width || previewInfo?.naturalWidth || pathDims.width;
+  const effectiveHeight = img.height || previewInfo?.naturalHeight || pathDims.height;
   if (img.isUnshrunk) return true;
   if (img.resolutionTier === '4k' || img.resolutionTier === 'hd') return true;
   if (effectiveWidth && effectiveHeight && (effectiveWidth >= 1000 || effectiveHeight >= 1000)) return true;
+  if (img.fullUrl && /\/contents\/albums\/sources\//i.test(img.fullUrl)) return true;
   if (img.fullUrl && isLowResUrl(img.fullUrl)) return false;
   return Boolean(img.isUnshrunk || (img.resolutionTier && img.resolutionTier !== 'small'));
 }
@@ -310,6 +357,7 @@ export interface GalleryFilterState {
   format: string;
   resolution: string;
   orientation: OrientationFilter;
+  galleryId?: string;
   searchQuery: string;
 }
 
@@ -323,6 +371,7 @@ export const DEFAULT_GALLERY_FILTERS: GalleryFilterState = {
   format: 'all',
   resolution: 'all',
   orientation: 'all',
+  galleryId: 'all',
   searchQuery: '',
 };
 
@@ -470,13 +519,25 @@ export function filterScrapedImages(
       if (orient !== filters.orientation) return false;
     }
 
+    if (filters.galleryId && filters.galleryId !== 'all' && img.galleryId !== filters.galleryId) {
+      return false;
+    }
+
     if (query) {
       const matchesName = img.filename.toLowerCase().includes(query);
       const matchesAlt = (img.altText || '').toLowerCase().includes(query);
       const matchesMethod = (img.unshrinkMethod || '').toLowerCase().includes(query);
       const matchesUrl = img.fullUrl.toLowerCase().includes(query);
       const matchesSubpage = (img.linkedPageUrl || '').toLowerCase().includes(query);
-      if (!matchesName && !matchesAlt && !matchesMethod && !matchesUrl && !matchesSubpage) {
+      const matchesGallery = (img.galleryTitle || '').toLowerCase().includes(query);
+      if (
+        !matchesName &&
+        !matchesAlt &&
+        !matchesMethod &&
+        !matchesUrl &&
+        !matchesSubpage &&
+        !matchesGallery
+      ) {
         return false;
       }
     }
@@ -499,6 +560,7 @@ export function countActiveFilters(filters: GalleryFilterState): number {
   if (filters.format !== 'all') count++;
   if (filters.resolution !== 'all') count++;
   if (filters.orientation !== 'all') count++;
+  if (filters.galleryId && filters.galleryId !== 'all') count++;
   if (filters.searchQuery.trim()) count++;
   return count;
 }

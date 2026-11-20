@@ -23,6 +23,10 @@ import {
   Search,
   Crop,
   Users,
+  Wand2,
+  Film,
+  FolderTree,
+  List,
 } from 'lucide-react';
 import {
   ScrapedImage,
@@ -37,6 +41,7 @@ import {
   getFilterFacetCounts,
   getEffectiveDimensions,
 } from '../utils/scraperLogic';
+import type { NestedGallerySummary } from '../utils/nestedGalleryLogic';
 import {
   downloadFileToDisk,
   triggerTextDownload,
@@ -51,6 +56,7 @@ interface GalleryViewProps {
   pageTitle: string;
   sourceUrl: string;
   unshrunkCount: number;
+  nestedGalleries?: NestedGallerySummary[];
   onSelectImage: (image: ScrapedImage) => void;
   onBatchDownloadZip: (selectedImages: ScrapedImage[]) => void;
   onDownloadIndividually?: (
@@ -65,7 +71,10 @@ interface GalleryViewProps {
   onLoadMorePosts?: () => void;
   totalProfilePosts?: number;
   onSendToCropResize?: (targetImages: ScrapedImage[]) => void;
+  onSendToFilterStudio?: (targetImages: ScrapedImage[]) => void;
+  onSendToGifMaker?: (targetImages: ScrapedImage[]) => void;
   onSendToHumanClassifier?: (targetImages: ScrapedImage[]) => void;
+  onSendToGemmaCaptioner?: (targetImages: ScrapedImage[]) => void;
 }
 
 interface GalleryCardProps {
@@ -139,10 +148,10 @@ const GalleryCard: React.FC<GalleryCardProps> = ({
   return (
     <article
       onClick={() => onSelectImage(img)}
-      className={`group bg-white dark:bg-[#111318] border rounded-xl overflow-hidden transition-all duration-150 flex flex-col cursor-pointer ${
+      className={`group bg-white dark:bg-[#111319] border rounded-xl overflow-hidden transition-all duration-150 flex flex-col cursor-pointer ${
         isSelected
-          ? 'border-blue-600 ring-2 ring-blue-600/20'
-          : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600'
+          ? 'border-blue-600 ring-2 ring-blue-600/20 shadow-sm'
+          : 'border-[#E4E0D6] dark:border-white/[0.08] hover:border-zinc-400 dark:hover:border-white/25 hover:-translate-y-0.5'
       }`}
     >
       {/* Thumbnail Viewport */}
@@ -260,9 +269,18 @@ const GalleryCard: React.FC<GalleryCardProps> = ({
             ) : null}
           </div>
 
+          {img.galleryTitle && (
+            <div
+              className="mt-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400 truncate"
+              title={`Child gallery: ${img.galleryTitle}`}
+            >
+              {img.galleryTitle}
+            </div>
+          )}
+
           {img.linkedPageUrl && (
             <div
-              className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-500 flex items-center gap-1 truncate"
+              className="mt-0.5 text-[11px] text-zinc-400 dark:text-zinc-500 flex items-center gap-1 truncate"
               title={`Linked subpage: ${img.linkedPageUrl}`}
             >
               <a
@@ -341,6 +359,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   pageTitle,
   sourceUrl,
   unshrunkCount,
+  nestedGalleries = [],
   onSelectImage,
   onBatchDownloadZip,
   onDownloadIndividually,
@@ -352,17 +371,22 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   onLoadMorePosts,
   totalProfilePosts,
   onSendToCropResize,
+  onSendToFilterStudio,
+  onSendToGifMaker,
   onSendToHumanClassifier,
+  onSendToGemmaCaptioner,
 }) => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filters, setFilters] = useState<GalleryFilterState>(DEFAULT_GALLERY_FILTERS);
   const [previewMap, setPreviewMap] = useState<Record<string, PreviewStateInfo>>({});
   const [isLinksModalOpen, setIsLinksModalOpen] = useState<boolean>(false);
   const [aspectMode, setAspectMode] = useState<'wide' | 'contact'>('contact');
+  const [groupByGallery, setGroupByGallery] = useState<boolean>(true);
 
   useEffect(() => {
     setPreviewMap({});
     setSelectedIds(new Set());
+    setFilters((prev) => ({ ...prev, galleryId: 'all' }));
   }, [sourceUrl]);
 
   useEffect(() => {
@@ -507,17 +531,66 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
     filteredImages.length > 0 && selectedInViewCount === filteredImages.length;
   const isCleanStackActive =
     filters.onlyMasters && filters.onlyPreviewable && filters.excludeIconsAndSmall;
+  const hasMultipleNestedGalleries = nestedGalleries.length > 1;
+
+  const groupedGallerySections = useMemo(() => {
+    if (!groupByGallery || !hasMultipleNestedGalleries || (filters.galleryId && filters.galleryId !== 'all')) {
+      return null;
+    }
+    const bucket = new Map<string, ScrapedImage[]>();
+    for (const img of filteredImages) {
+      const key = img.galleryId || 'other';
+      const arr = bucket.get(key) || [];
+      arr.push(img);
+      bucket.set(key, arr);
+    }
+    const sections: { id: string; title: string; url: string; items: ScrapedImage[] }[] = [];
+    for (const g of nestedGalleries) {
+      const items = bucket.get(g.id);
+      if (items && items.length > 0) {
+        sections.push({ id: g.id, title: g.title, url: g.url, items });
+        bucket.delete(g.id);
+      }
+    }
+    for (const [id, items] of bucket.entries()) {
+      sections.push({
+        id,
+        title: items[0]?.galleryTitle || 'Other Images',
+        url: items[0]?.galleryUrl || sourceUrl,
+        items,
+      });
+    }
+    return sections;
+  }, [groupByGallery, hasMultipleNestedGalleries, filters.galleryId, filteredImages, nestedGalleries, sourceUrl]);
+
+  const handleToggleSelectGalleryGroup = (items: ScrapedImage[]) => {
+    const allChecked = items.length > 0 && items.every((i) => selectedIds.has(i.id));
+    const next = new Set(selectedIds);
+    for (const item of items) {
+      if (allChecked) next.delete(item.id);
+      else next.add(item.id);
+    }
+    setSelectedIds(next);
+  };
 
   return (
     <div className="space-y-5">
       {/* Gallery Header & Filter Workbench */}
-      <section className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 sm:p-6 transition-colors">
+      <section className="bg-white dark:bg-[#111319] border border-[#E4E0D6] dark:border-white/[0.08] rounded-2xl p-5 sm:p-6 transition-colors">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="min-w-0">
             <h2 className="font-display text-xl sm:text-2xl font-bold text-zinc-950 dark:text-white truncate max-w-2xl">
               {pageTitle || 'Extracted Asset Contact Sheet'}
             </h2>
             <div className="flex items-center gap-2 text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-1 flex-wrap tabular-nums">
+              {nestedGalleries.length > 0 && (
+                <>
+                  <span className="font-semibold text-[#141413] dark:text-zinc-100">
+                    {nestedGalleries.length} nested {nestedGalleries.length === 1 ? 'gallery' : 'galleries'}
+                  </span>
+                  <span aria-hidden="true">·</span>
+                </>
+              )}
               <span className="font-semibold text-zinc-800 dark:text-zinc-200">
                 {images.length} images extracted
               </span>
@@ -546,10 +619,47 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                 type="text"
                 value={filters.searchQuery}
                 onChange={(e) => updateFilter('searchQuery', e.target.value)}
-                placeholder="Search filename, alt, or URL..."
+                placeholder="Search filename, gallery, or URL..."
                 className="w-full pl-8.5 pr-3 py-2 bg-zinc-50 dark:bg-[#0B0C10] border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs text-zinc-950 dark:text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
+
+            {hasMultipleNestedGalleries && (
+              <div
+                role="group"
+                aria-label="Gallery grouping mode"
+                className="inline-flex items-center p-0.5 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shrink-0"
+              >
+                <button
+                  type="button"
+                  onClick={() => setGroupByGallery(true)}
+                  title="Group photos by child gallery"
+                  aria-label="Group photos by child gallery"
+                  aria-pressed={groupByGallery}
+                  className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                    groupByGallery
+                      ? 'bg-white dark:bg-[#1A1D26] text-zinc-950 dark:text-white shadow-xs'
+                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  <FolderTree className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGroupByGallery(false)}
+                  title="Flat contact sheet across all galleries"
+                  aria-label="Flat contact sheet across all galleries"
+                  aria-pressed={!groupByGallery}
+                  className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                    !groupByGallery
+                      ? 'bg-white dark:bg-[#1A1D26] text-zinc-950 dark:text-white shadow-xs'
+                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  <List className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
 
             <div
               role="group"
@@ -679,6 +789,25 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                   <option value="square">Square ({facets.square})</option>
                 </select>
               </label>
+
+              {nestedGalleries.length > 0 && (
+                <label className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400">
+                  <span className="font-medium">Gallery</span>
+                  <select
+                    aria-label="Filter by child gallery"
+                    value={filters.galleryId || 'all'}
+                    onChange={(e) => updateFilter('galleryId', e.target.value)}
+                    className="bg-zinc-50 dark:bg-[#0B0C10] border border-zinc-200 dark:border-zinc-800 rounded-md px-2 py-1 text-zinc-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-blue-600 max-w-[200px]"
+                  >
+                    <option value="all">All Galleries ({images.length})</option>
+                    {nestedGalleries.map((gal) => (
+                      <option key={gal.id} value={gal.id}>
+                        {gal.title} ({gal.imageCount})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
 
             <div className="text-zinc-500 dark:text-zinc-400 font-mono tabular-nums text-xs">
@@ -689,7 +818,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
       </section>
 
       {/* Batch Action Toolbar */}
-      <section className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 transition-colors">
+      <section className="bg-white dark:bg-[#111319] border border-[#E4E0D6] dark:border-white/[0.08] rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 transition-colors">
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
@@ -828,6 +957,44 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             </button>
           )}
 
+          {onSendToFilterStudio && (
+            <button
+              type="button"
+              onClick={() => {
+                const targets =
+                  selectedIds.size > 0
+                    ? images.filter((img) => selectedIds.has(img.id))
+                    : filteredImages;
+                if (targets.length > 0) onSendToFilterStudio(targets);
+              }}
+              disabled={filteredImages.length === 0 && selectedIds.size === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-40"
+              title="Apply color adjustments and Snapchat-inspired lenses inside Filter Studio"
+            >
+              <Wand2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>Filter &amp; Lens ({selectedIds.size > 0 ? selectedIds.size : filteredImages.length})</span>
+            </button>
+          )}
+
+          {onSendToGifMaker && (
+            <button
+              type="button"
+              onClick={() => {
+                const targets =
+                  selectedIds.size > 0
+                    ? images.filter((img) => selectedIds.has(img.id))
+                    : filteredImages;
+                if (targets.length > 0) onSendToGifMaker(targets);
+              }}
+              disabled={filteredImages.length === 0 && selectedIds.size === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-40"
+              title="Turn selected or filtered images into an animated GIF"
+            >
+              <Film className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>Make GIF ({selectedIds.size > 0 ? selectedIds.size : filteredImages.length})</span>
+            </button>
+          )}
+
           {onSendToHumanClassifier && (
             <button
               type="button"
@@ -844,6 +1011,25 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             >
               <Users className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
               <span>Classify Humans ({selectedIds.size > 0 ? selectedIds.size : filteredImages.length})</span>
+            </button>
+          )}
+
+          {onSendToGemmaCaptioner && (
+            <button
+              type="button"
+              onClick={() => {
+                const targets =
+                  selectedIds.size > 0
+                    ? images.filter((img) => selectedIds.has(img.id))
+                    : filteredImages;
+                if (targets.length > 0) onSendToGemmaCaptioner(targets);
+              }}
+              disabled={filteredImages.length === 0 && selectedIds.size === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-40"
+              title="Auto-caption selected or filtered images locally with open-source Gemma 4"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>Caption with Gemma 4 ({selectedIds.size > 0 ? selectedIds.size : filteredImages.length})</span>
             </button>
           )}
 
@@ -875,9 +1061,9 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
         </div>
       </section>
 
-      {/* Contact-Sheet Grid */}
+      {/* Contact-Sheet Grid (Grouped by Child Gallery or Flat) */}
       {filteredImages.length === 0 ? (
-        <div className="text-center py-16 bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-8">
+        <div className="text-center py-16 bg-white dark:bg-[#111319] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-8">
           <ImageIcon className="w-10 h-10 mx-auto text-zinc-400 mb-3" />
           <h3 className="text-base font-semibold text-zinc-950 dark:text-white">
             No images match your stacked filters
@@ -896,13 +1082,80 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             </button>
           )}
         </div>
+      ) : groupedGallerySections ? (
+        <div className="space-y-8">
+          {groupedGallerySections.map((section, sIdx) => {
+            const allGroupSelected = section.items.every((i) => selectedIds.has(i.id));
+            return (
+              <section key={section.id} className="space-y-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-[#E4E0D6] dark:border-white/[0.08]">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-mono text-xs tabular-nums text-zinc-400 shrink-0">
+                        {String(sIdx + 1).padStart(2, '0')}.
+                      </span>
+                      <h3 className="font-display text-base sm:text-lg font-bold text-[#141413] dark:text-white truncate">
+                        {section.title}
+                      </h3>
+                      <span className="text-xs font-mono tabular-nums text-zinc-500 dark:text-zinc-400 shrink-0">
+                        · {section.items.length} photos
+                      </span>
+                    </div>
+                    <a
+                      href={section.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] font-mono text-zinc-500 dark:text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 truncate max-w-md mt-0.5"
+                    >
+                      <span className="truncate">{section.url}</span>
+                      <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                    </a>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSelectGalleryGroup(section.items)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-[#111319] border border-[#E4E0D6] dark:border-white/[0.08] hover:border-blue-500 rounded-lg text-xs font-semibold text-[#141413] dark:text-zinc-200 transition-colors whitespace-nowrap shrink-0 self-start sm:self-center cursor-pointer tabular-nums"
+                  >
+                    {allGroupSelected ? (
+                      <CheckSquare className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    ) : (
+                      <Square className="w-3.5 h-3.5 text-zinc-400" />
+                    )}
+                    <span>
+                      {allGroupSelected
+                        ? `Deselect Gallery (${section.items.length})`
+                        : `Select Gallery (${section.items.length})`}
+                    </span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
+                  {section.items.map((img) => (
+                    <GalleryCard
+                      key={img.id}
+                      img={img}
+                      sourceUrl={img.galleryUrl || sourceUrl}
+                      aspectMode={aspectMode}
+                      isSelected={selectedIds.has(img.id)}
+                      previewInfo={previewMap[img.id]}
+                      onToggleSelect={toggleSelect}
+                      onSelectImage={onSelectImage}
+                      onPreviewUpdate={handlePreviewUpdate}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
           {filteredImages.map((img) => (
             <GalleryCard
               key={img.id}
               img={img}
-              sourceUrl={sourceUrl}
+              sourceUrl={img.galleryUrl || sourceUrl}
               aspectMode={aspectMode}
               isSelected={selectedIds.has(img.id)}
               previewInfo={previewMap[img.id]}

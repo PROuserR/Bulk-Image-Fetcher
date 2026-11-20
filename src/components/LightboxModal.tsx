@@ -296,6 +296,28 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
                     </div>
                   </div>
 
+                  {image.galleryTitle && (
+                    <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
+                      <span className="text-zinc-500 dark:text-zinc-400 block mb-1 text-[11px]">
+                        Child Gallery Source
+                      </span>
+                      <div className="text-xs font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                        {image.galleryTitle}
+                      </div>
+                      {image.galleryUrl && (
+                        <a
+                          href={image.galleryUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline truncate block mt-0.5"
+                          title={image.galleryUrl}
+                        >
+                          {image.galleryUrl}
+                        </a>
+                      )}
+                    </div>
+                  )}
+
                   {image.linkedPageUrl && (
                     <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
                       <span className="text-zinc-500 dark:text-zinc-400 block mb-1 text-[11px]">

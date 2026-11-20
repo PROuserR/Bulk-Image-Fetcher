@@ -7,14 +7,36 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import JSZip from 'jszip';
-import { Header } from './components/Header';
-import { ScraperControls } from './components/ScraperControls';
+import { motion, MotionConfig } from 'motion/react';
+import { Header, WorkspaceTabId } from './components/Header';
+import { StudioSidebar } from './components/StudioSidebar';
+import { CommandPalette } from './components/CommandPalette';
+import { BentoShowcase } from './components/BentoShowcase';
+import {
+  ScraperControls,
+  ExtractorMode,
+  NestedDiscoverOptions,
+} from './components/ScraperControls';
+import {
+  NestedGalleryQueue,
+  NestedCrawlProgressState,
+} from './components/NestedGalleryQueue';
 import { GalleryView } from './components/GalleryView';
 import { LightboxModal } from './components/LightboxModal';
 import { DeploymentDocs } from './components/DeploymentDocs';
 import { CropResizeStudio } from './components/CropResizeStudio';
+import { FilterStudio } from './components/FilterStudio';
+import { GifMakerStudio } from './components/GifMakerStudio';
 import { HumanClassifierStudio } from './components/HumanClassifierStudio';
+import { GemmaStudio } from './components/GemmaStudio';
 import { ScrapedImage } from './utils/scraperLogic';
+import {
+  DiscoveredGallery,
+  NestedGallerySummary,
+  NestedGalleryRunInput,
+  mergeNestedGalleryResults,
+  sanitizeGalleryFolderName,
+} from './utils/nestedGalleryLogic';
 import { SAMPLE_PRESETS } from './utils/samplePages';
 import { triggerBlobDownload } from './utils/downloader';
 import {
@@ -24,15 +46,18 @@ import {
 } from './utils/progressiveDownloader';
 import { ProgressiveDownloadBar } from './components/ProgressiveDownloadBar';
 import { fetchApiJson } from './utils/safeFetchJson';
-import { AlertCircle, CheckCircle2, ArrowUpRight } from 'lucide-react';
+import { AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [themeHydrated, setThemeHydrated] = useState<boolean>(false);
 
-  const [activeTab, setActiveTab] = useState<'scraper' | 'crop' | 'classifier' | 'docs'>('scraper');
+  const [activeTab, setActiveTab] = useState<WorkspaceTabId>('scraper');
   const [cropSeedImages, setCropSeedImages] = useState<ScrapedImage[]>([]);
+  const [filterSeedImages, setFilterSeedImages] = useState<ScrapedImage[]>([]);
+  const [gifSeedImages, setGifSeedImages] = useState<ScrapedImage[]>([]);
   const [classifierSeedImages, setClassifierSeedImages] = useState<ScrapedImage[]>([]);
+  const [gemmaSeedImages, setGemmaSeedImages] = useState<ScrapedImage[]>([]);
   const [images, setImages] = useState<ScrapedImage[]>([]);
   const [pageTitle, setPageTitle] = useState<string>('');
   const [sourceUrl, setSourceUrl] = useState<string>('');
@@ -50,9 +75,23 @@ export default function App() {
   const [instagramSession, setInstagramSession] = useState<string>('');
   const [instagramMaxPosts, setInstagramMaxPosts] = useState<number>(200);
   const [isInstagramLoginRequired, setIsInstagramLoginRequired] = useState<boolean>(false);
-  const [requestedMode, setRequestedMode] = useState<
-    'url' | 'instagram' | 'harvester' | 'paste' | null
-  >(null);
+  const [requestedMode, setRequestedMode] = useState<ExtractorMode | null>(null);
+  const [nestedDiscovery, setNestedDiscovery] = useState<{
+    parentUrl: string;
+    parentTitle: string;
+    galleries: DiscoveredGallery[];
+    followLinkedPages: boolean;
+  } | null>(null);
+  const [selectedNestedIds, setSelectedNestedIds] = useState<Set<string>>(new Set());
+  const [isDiscoveringNested, setIsDiscoveringNested] = useState<boolean>(false);
+  const [nestedCrawlProgress, setNestedCrawlProgress] = useState<NestedCrawlProgressState>({
+    isCrawling: false,
+    completedCount: 0,
+    totalCount: 0,
+    extractedImagesCount: 0,
+    statusById: {},
+  });
+  const [nestedSummaries, setNestedSummaries] = useState<NestedGallerySummary[]>([]);
   const [instagramContinuation, setInstagramContinuation] = useState<{
     profileUrl: string;
     userId?: string;
@@ -64,10 +103,15 @@ export default function App() {
   const [isLoadingMorePosts, setIsLoadingMorePosts] = useState<boolean>(false);
   const [progressiveState, setProgressiveState] = useState<ProgressiveDownloadProgress | null>(null);
   const [progressiveModeLabel, setProgressiveModeLabel] = useState<string>('Progressive Direct Save');
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const directSaveAbortRef = useRef<AbortController | null>(null);
   const lastDirectSaveImagesRef = useRef<ScrapedImage[]>([]);
+  const nestedAbortRef = useRef<AbortController | null>(null);
+  const discoverNestedRef = useRef<
+    ((url: string, options: NestedDiscoverOptions) => Promise<void>) | null
+  >(null);
 
   const showToast = useCallback((message: string) => {
     if (toastTimerRef.current) {
@@ -84,17 +128,30 @@ export default function App() {
     setCropSeedImages([]);
   }, []);
 
+  const handleClearFilterSeed = useCallback(() => {
+    setFilterSeedImages([]);
+  }, []);
+
+  const handleClearGifSeed = useCallback(() => {
+    setGifSeedImages([]);
+  }, []);
+
   const handleClearClassifierSeed = useCallback(() => {
     setClassifierSeedImages([]);
+  }, []);
+
+  const handleClearGemmaSeed = useCallback(() => {
+    setGemmaSeedImages([]);
   }, []);
 
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      nestedAbortRef.current?.abort();
     };
   }, []);
 
-  const handleSelectTab = useCallback((nextTab: 'scraper' | 'crop' | 'classifier' | 'docs') => {
+  const handleSelectTab = useCallback((nextTab: WorkspaceTabId) => {
     setActiveTab(nextTab);
     try {
       const nextUrl = new URL(window.location.href);
@@ -119,7 +176,10 @@ export default function App() {
       if (
         urlTab === 'scraper' ||
         urlTab === 'crop' ||
+        urlTab === 'filters' ||
+        urlTab === 'gif' ||
         urlTab === 'classifier' ||
+        urlTab === 'gemma' ||
         urlTab === 'docs'
       ) {
         setActiveTab(urlTab);
@@ -132,7 +192,14 @@ export default function App() {
       try {
         const params = new URLSearchParams(window.location.search);
         const urlTab = params.get('tab');
-        if (urlTab === 'crop' || urlTab === 'classifier' || urlTab === 'docs') {
+        if (
+          urlTab === 'crop' ||
+          urlTab === 'filters' ||
+          urlTab === 'gif' ||
+          urlTab === 'classifier' ||
+          urlTab === 'gemma' ||
+          urlTab === 'docs'
+        ) {
           setActiveTab(urlTab);
         } else {
           setActiveTab('scraper');
@@ -174,6 +241,40 @@ export default function App() {
       // ignore storage restrictions
     }
   }, [theme, themeHydrated]);
+
+  // Global Cmd/Ctrl+K command palette + 1-7 studio switcher shortcuts
+  useEffect(() => {
+    const tabByKey: Record<string, WorkspaceTabId> = {
+      '1': 'scraper',
+      '2': 'crop',
+      '3': 'filters',
+      '4': 'gif',
+      '5': 'classifier',
+      '6': 'gemma',
+      '7': 'docs',
+    };
+    const onGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen((prev) => !prev);
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      const isEditable =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable);
+      if (isEditable || e.metaKey || e.ctrlKey || e.altKey) return;
+      const mapped = tabByKey[e.key];
+      if (mapped) {
+        handleSelectTab(mapped);
+      }
+    };
+    window.addEventListener('keydown', onGlobalKeyDown);
+    return () => window.removeEventListener('keydown', onGlobalKeyDown);
+  }, [handleSelectTab]);
 
   const applyScrapeResponse = useCallback(
     (data: any, fallbackUrl: string, successLabel?: string) => {
@@ -219,6 +320,17 @@ export default function App() {
       relayOverride?: string,
       igOptions?: { sessionCookie?: string; maxPosts?: number }
     ) => {
+      nestedAbortRef.current?.abort();
+      setNestedDiscovery(null);
+      setSelectedNestedIds(new Set());
+      setNestedSummaries([]);
+      setNestedCrawlProgress({
+        isCrawling: false,
+        completedCount: 0,
+        totalCount: 0,
+        extractedImagesCount: 0,
+        statusById: {},
+      });
       setIsLoading(true);
       setErrorMessage(null);
       setGeoNotice(null);
@@ -252,6 +364,23 @@ export default function App() {
           throw new Error(data?.error || error || 'Failed to extract images from target webpage.');
         }
 
+        if (
+          data.suggestedNestedHub &&
+          (data.suggestedNestedCount ?? 0) >= 2 &&
+          !customHtml &&
+          (followLinkedPages ?? true) &&
+          discoverNestedRef.current
+        ) {
+          setRequestedMode('nested');
+          void discoverNestedRef.current(url, {
+            sameOriginOnly: true,
+            maxGalleries: 30,
+            followLinkedPages: true,
+            autoScrape: true,
+          });
+          return;
+        }
+
         applyScrapeResponse(data, url);
       } catch (err: any) {
         setErrorMessage(err.message || 'An unexpected error occurred while scraping.');
@@ -262,6 +391,323 @@ export default function App() {
     [applyScrapeResponse, instagramMaxPosts, instagramSession, relayUrl]
   );
 
+  const crawlNestedGalleries = useCallback(
+    async (
+      galleriesToCrawl: DiscoveredGallery[],
+      parentUrl: string,
+      parentTitle: string,
+      followLinkedPages: boolean
+    ) => {
+      if (galleriesToCrawl.length === 0) return;
+
+      nestedAbortRef.current?.abort();
+      const abortController = new AbortController();
+      nestedAbortRef.current = abortController;
+
+      setErrorMessage(null);
+      setGeoNotice(null);
+      setIsInstagramLoginRequired(false);
+      setInstagramContinuation(null);
+      setImages([]);
+      setNestedSummaries([]);
+      setPageTitle(parentTitle || parentUrl);
+      setSourceUrl(parentUrl);
+      setUnshrunkCount(0);
+
+      const initialStatuses: NestedCrawlProgressState['statusById'] = {};
+      for (const g of galleriesToCrawl) {
+        initialStatuses[g.id] = { status: 'queued' };
+      }
+
+      setNestedCrawlProgress({
+        isCrawling: true,
+        completedCount: 0,
+        totalCount: galleriesToCrawl.length,
+        activeTitle: galleriesToCrawl[0]?.title,
+        extractedImagesCount: 0,
+        statusById: initialStatuses,
+      });
+
+      const runByIndex: (NestedGalleryRunInput | null)[] = new Array(galleriesToCrawl.length).fill(null);
+      let completedCount = 0;
+      let anyGeoBlocked = false;
+      let cursor = 0;
+
+      const worker = async () => {
+        while (!abortController.signal.aborted) {
+          const idx = cursor++;
+          if (idx >= galleriesToCrawl.length) break;
+
+          const gal = galleriesToCrawl[idx];
+          setNestedCrawlProgress((prev) => ({
+            ...prev,
+            activeTitle: gal.title,
+            statusById: {
+              ...prev.statusById,
+              [gal.id]: { status: 'crawling' },
+            },
+          }));
+
+          try {
+            const resp = await fetch('/api/scrape', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                url: gal.url,
+                followLinkedPages,
+                relayUrl: relayUrl.trim() || undefined,
+              }),
+              signal: abortController.signal,
+            });
+
+            const data = await resp.json().catch(() => null);
+
+            if (resp.ok && data && Array.isArray(data.images)) {
+              if (data.geoBlocked) anyGeoBlocked = true;
+              runByIndex[idx] = {
+                gallery: gal,
+                result: {
+                  url: data.url || gal.url,
+                  pageTitle: data.pageTitle || gal.title,
+                  images: data.images,
+                  stats: data.stats || {
+                    totalFound: data.images.length,
+                    unshrunkCount: 0,
+                    formats: {},
+                  },
+                },
+                geoBlocked: Boolean(data.geoBlocked),
+              };
+            } else {
+              if (data?.geoBlocked) anyGeoBlocked = true;
+              runByIndex[idx] = {
+                gallery: gal,
+                result: null,
+                error: data?.error || `HTTP ${resp.status}`,
+                geoBlocked: Boolean(data?.geoBlocked),
+              };
+            }
+          } catch (err: any) {
+            if (abortController.signal.aborted || err?.name === 'AbortError') {
+              break;
+            }
+            runByIndex[idx] = {
+              gallery: gal,
+              result: null,
+              error: err?.message || 'Network failure',
+            };
+          }
+
+          if (abortController.signal.aborted) break;
+
+          completedCount++;
+          const completedRuns = runByIndex.filter(
+            (r): r is NestedGalleryRunInput => r !== null
+          );
+          const merged = mergeNestedGalleryResults(parentUrl, parentTitle, completedRuns);
+
+          setImages(merged.images);
+          setPageTitle(merged.pageTitle);
+          setSourceUrl(merged.url);
+          setUnshrunkCount(merged.stats.unshrunkCount);
+          setNestedSummaries(merged.galleries);
+
+          const finishedRun = runByIndex[idx];
+          const finishedCount = finishedRun?.result?.images?.length ?? 0;
+          setNestedCrawlProgress((prev) => ({
+            ...prev,
+            completedCount,
+            extractedImagesCount: merged.images.length,
+            statusById: {
+              ...prev.statusById,
+              [gal.id]:
+                finishedRun && finishedRun.result && !finishedRun.error
+                  ? { status: 'completed', count: finishedCount }
+                  : {
+                      status: 'failed',
+                      error: finishedRun?.error || 'Extraction failed',
+                    },
+            },
+          }));
+        }
+      };
+
+      const concurrency = Math.min(2, galleriesToCrawl.length);
+      await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+      if (nestedAbortRef.current === abortController) {
+        nestedAbortRef.current = null;
+      }
+
+      const finalRuns = runByIndex.filter((r): r is NestedGalleryRunInput => r !== null);
+      const finalMerged = mergeNestedGalleryResults(parentUrl, parentTitle, finalRuns);
+
+      setImages(finalMerged.images);
+      setPageTitle(finalMerged.pageTitle);
+      setSourceUrl(finalMerged.url);
+      setUnshrunkCount(finalMerged.stats.unshrunkCount);
+      setNestedSummaries(finalMerged.galleries);
+      if (anyGeoBlocked) {
+        setIsGeoBlocked(true);
+      }
+
+      setNestedCrawlProgress((prev) => ({
+        ...prev,
+        isCrawling: false,
+        activeTitle: undefined,
+        completedCount,
+        extractedImagesCount: finalMerged.images.length,
+      }));
+
+      if (abortController.signal.aborted) {
+        showToast(
+          `Stopped nested crawl (${finalMerged.images.length} images kept from ${finalMerged.stats.completedGalleries} galleries).`
+        );
+      } else if (finalMerged.images.length > 0) {
+        showToast(
+          `Extracted ${finalMerged.images.length} full-res images across ${finalMerged.stats.completedGalleries} nested galleries (${finalMerged.stats.unshrunkCount} upgraded to master full-res)!`
+        );
+      } else {
+        setErrorMessage(
+          'Could not extract images from the selected child galleries. Try toggling "Follow Linked Detail Webpages" or configuring a Relay URL.'
+        );
+      }
+    },
+    [relayUrl, showToast]
+  );
+
+  const handleDiscoverNestedGalleries = useCallback(
+    async (url: string, options: NestedDiscoverOptions) => {
+      nestedAbortRef.current?.abort();
+      setIsDiscoveringNested(true);
+      setErrorMessage(null);
+      setGeoNotice(null);
+      setIsInstagramLoginRequired(false);
+      setInstagramContinuation(null);
+
+      try {
+        const { ok, data, error } = await fetchApiJson('/api/scrape/discover-galleries', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url,
+            relayUrl: relayUrl.trim() || undefined,
+            urlPatternFilter: options.urlPatternFilter || '',
+            sameOriginOnly: options.sameOriginOnly,
+            maxGalleries: options.maxGalleries,
+          }),
+        });
+
+        if (!ok || !data) {
+          if (data?.geoBlocked) setIsGeoBlocked(true);
+          throw new Error(data?.error || error || 'Failed to discover child galleries from webpage.');
+        }
+
+        const discovered: DiscoveredGallery[] = data.galleries || [];
+        const resolvedParentUrl = data.parentUrl || url;
+        const resolvedParentTitle = data.parentTitle || url;
+
+        setNestedDiscovery({
+          parentUrl: resolvedParentUrl,
+          parentTitle: resolvedParentTitle,
+          galleries: discovered,
+          followLinkedPages: options.followLinkedPages,
+        });
+        setSelectedNestedIds(new Set(discovered.map((g) => g.id)));
+        setNestedSummaries([]);
+        setNestedCrawlProgress({
+          isCrawling: false,
+          completedCount: 0,
+          totalCount: discovered.length,
+          extractedImagesCount: 0,
+          statusById: {},
+        });
+
+        if (discovered.length === 0) {
+          setGeoNotice(
+            data.notice ||
+              'No child gallery URLs were detected on this webpage. Try unchecking "Same domain only" or adding a custom URL filter.'
+          );
+          return;
+        }
+
+        if (options.autoScrape) {
+          setIsDiscoveringNested(false);
+          await crawlNestedGalleries(
+            discovered,
+            resolvedParentUrl,
+            resolvedParentTitle,
+            options.followLinkedPages
+          );
+          return;
+        }
+
+        showToast(
+          `Discovered ${discovered.length} child galleries on ${resolvedParentTitle}. Select galleries to scrape.`
+        );
+      } catch (err: any) {
+        setErrorMessage(err?.message || 'Failed to discover nested galleries.');
+      } finally {
+        setIsDiscoveringNested(false);
+      }
+    },
+    [crawlNestedGalleries, relayUrl, showToast]
+  );
+
+  useEffect(() => {
+    discoverNestedRef.current = handleDiscoverNestedGalleries;
+  }, [handleDiscoverNestedGalleries]);
+
+  const handleToggleNestedSelect = useCallback((id: string) => {
+    setSelectedNestedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSelectAllNested = useCallback(() => {
+    if (!nestedDiscovery) return;
+    setSelectedNestedIds((prev) =>
+      prev.size === nestedDiscovery.galleries.length
+        ? new Set()
+        : new Set(nestedDiscovery.galleries.map((g) => g.id))
+    );
+  }, [nestedDiscovery]);
+
+  const handleScrapeSelectedNested = useCallback(() => {
+    if (!nestedDiscovery) return;
+    const targets = nestedDiscovery.galleries.filter((g) => selectedNestedIds.has(g.id));
+    if (targets.length === 0) return;
+    crawlNestedGalleries(
+      targets,
+      nestedDiscovery.parentUrl,
+      nestedDiscovery.parentTitle,
+      nestedDiscovery.followLinkedPages
+    );
+  }, [crawlNestedGalleries, nestedDiscovery, selectedNestedIds]);
+
+  const handleCancelNestedCrawl = useCallback(() => {
+    nestedAbortRef.current?.abort();
+  }, []);
+
+  const handleClearNestedQueue = useCallback(() => {
+    nestedAbortRef.current?.abort();
+    setNestedDiscovery(null);
+    setSelectedNestedIds(new Set());
+    setNestedCrawlProgress({
+      isCrawling: false,
+      completedCount: 0,
+      totalCount: 0,
+      extractedImagesCount: 0,
+      statusById: {},
+    });
+  }, []);
+
   const toggleTheme = () => {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
@@ -271,6 +717,17 @@ export default function App() {
     sessionCookie?: string,
     maxPosts?: number
   ) => {
+    nestedAbortRef.current?.abort();
+    setNestedDiscovery(null);
+    setSelectedNestedIds(new Set());
+    setNestedSummaries([]);
+    setNestedCrawlProgress({
+      isCrawling: false,
+      completedCount: 0,
+      totalCount: 0,
+      extractedImagesCount: 0,
+      statusById: {},
+    });
     setIsLoading(true);
     setErrorMessage(null);
     setGeoNotice(null);
@@ -441,8 +898,11 @@ export default function App() {
             fallbackUrl: img.fallbackUrl,
             linkedPageUrl: img.linkedPageUrl,
             filename: img.filename,
+            galleryTitle: img.galleryTitle,
+            galleryId: img.galleryId,
           })),
           referer: sourceUrl,
+          relayUrl: relayUrl.trim() || undefined,
           onlyFullRes: true,
         }),
         signal: AbortSignal.timeout(40000),
@@ -469,7 +929,7 @@ export default function App() {
     try {
       setDownloadProgress(`Assembling ZIP in browser (0 of ${selectedImages.length})...`);
       const clientZip = new JSZip();
-      const seenNames = new Set<string>();
+      const seenByFolder = new Map<string, Set<string>>();
       let addedCount = 0;
 
       const BATCH_SIZE = 3;
@@ -479,6 +939,15 @@ export default function App() {
           batch.map(async (img, idx) => {
             const overallIdx = i + idx;
             setDownloadProgress(`Fetching master image ${overallIdx + 1} of ${selectedImages.length}...`);
+
+            const folderKey = img.galleryTitle
+              ? sanitizeGalleryFolderName(img.galleryTitle, img.galleryId || 'gallery')
+              : '';
+            let seenNames = seenByFolder.get(folderKey);
+            if (!seenNames) {
+              seenNames = new Set<string>();
+              seenByFolder.set(folderKey, seenNames);
+            }
 
             let filename = img.filename || `image_${overallIdx + 1}.jpg`;
             const lastDot = filename.lastIndexOf('.');
@@ -491,10 +960,12 @@ export default function App() {
               counter++;
             }
             seenNames.add(uniqueName);
+            const zipEntryPath = folderKey ? `${folderKey}/${uniqueName}` : uniqueName;
 
             let imageBlob: Blob | null = null;
             try {
-              const downloadUrl = `/api/download-file?url=${encodeURIComponent(img.fullUrl)}&filename=${encodeURIComponent(uniqueName)}&referer=${encodeURIComponent(sourceUrl)}`;
+              const relayParam = relayUrl.trim() ? `&relayUrl=${encodeURIComponent(relayUrl.trim())}` : '';
+              const downloadUrl = `/api/download-file?url=${encodeURIComponent(img.fullUrl)}&filename=${encodeURIComponent(uniqueName)}&referer=${encodeURIComponent(sourceUrl)}${relayParam}`;
               const resp = await fetch(downloadUrl, { signal: AbortSignal.timeout(12000) });
               if (resp.ok) {
                 imageBlob = await resp.blob();
@@ -511,7 +982,7 @@ export default function App() {
             }
 
             if (imageBlob && imageBlob.size > 0) {
-              clientZip.file(uniqueName, imageBlob);
+              clientZip.file(zipEntryPath, imageBlob);
               addedCount++;
             }
           })
@@ -661,266 +1132,340 @@ export default function App() {
   const firstSamplePreset = SAMPLE_PRESETS[0];
 
   return (
-    <div className="min-h-screen bg-[#F9F9FB] dark:bg-[#090A0F] text-zinc-900 dark:text-zinc-100 flex flex-col font-sans transition-colors duration-200">
-      <Header
-        theme={theme}
-        onToggleTheme={toggleTheme}
-        activeTab={activeTab}
-        onSelectTab={handleSelectTab}
-        onExportProjectZip={handleExportProjectZip}
-        isExportingZip={isExportingZip}
-      />
+    <MotionConfig reducedMotion="user">
+      <div className="min-h-screen flex text-[#141413] dark:text-[#F5F4F0] font-sans transition-colors duration-200">
+        {/* Left Studio Navigation Rail (Desktop/Tablet) */}
+        <StudioSidebar
+          activeTab={activeTab}
+          onSelectTab={handleSelectTab}
+          onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+          extractedCount={images.length}
+        />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-7 sm:py-9 space-y-6">
-        {successToast && (
-          <div className="px-4 py-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/80 text-emerald-900 dark:text-emerald-200 text-xs sm:text-sm font-medium rounded-xl flex items-center gap-2.5 animate-fadeIn">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span>{successToast}</span>
-          </div>
-        )}
-
-        {errorMessage && (
-          <div className="px-4 py-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/80 text-rose-900 dark:text-rose-200 text-xs sm:text-sm font-medium rounded-xl flex items-center gap-2.5 animate-fadeIn">
-            <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
-            <span className="flex-1">{errorMessage}</span>
-            <button
-              type="button"
-              onClick={() => setErrorMessage(null)}
-              className="text-xs underline hover:no-underline shrink-0 cursor-pointer"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {geoNotice && (
-          <div className="px-4 py-3 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/80 text-amber-950 dark:text-amber-200 text-xs sm:text-sm font-medium rounded-xl flex items-center gap-2.5 animate-fadeIn">
-            <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-            <span className="flex-1">{geoNotice}</span>
-            <button
-              type="button"
-              onClick={() => setGeoNotice(null)}
-              className="text-xs underline hover:no-underline shrink-0 cursor-pointer"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {/* Tab 1: Scraper & Contact-Sheet Studio */}
-        <div
-          id="tabpanel-scraper"
-          role="tabpanel"
-          hidden={activeTab !== 'scraper'}
-          className={activeTab === 'scraper' ? 'space-y-6' : 'hidden'}
-        >
-          <ScraperControls
-            onScrape={handleScrape}
-            onFetchInstagramProfile={handleFetchInstagramProfile}
-            isLoading={isLoading}
-            currentUrl={sourceUrl}
-            relayUrl={relayUrl}
-            onRelayUrlChange={setRelayUrl}
-            geoBlocked={isGeoBlocked}
-            instagramSession={instagramSession}
-            onInstagramSessionChange={setInstagramSession}
-            instagramMaxPosts={instagramMaxPosts}
-            onInstagramMaxPostsChange={setInstagramMaxPosts}
-            instagramLoginRequired={isInstagramLoginRequired}
-            requestedMode={requestedMode}
-            onModeHandled={() => setRequestedMode(null)}
+        {/* Right Fluid Workspace Column */}
+        <div className="flex-1 min-w-0 flex flex-col min-h-screen">
+          <Header
+            theme={theme}
+            onToggleTheme={toggleTheme}
+            activeTab={activeTab}
+            onSelectTab={handleSelectTab}
+            onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+            onExportProjectZip={handleExportProjectZip}
+            isExportingZip={isExportingZip}
           />
 
-          {progressiveState && (
-            <ProgressiveDownloadBar
-              progress={progressiveState}
-              modeLabel={progressiveModeLabel}
-              onCancel={handleCancelDirectSave}
-              onRetryFailed={handleRetryFailedDirectSave}
-              onDismiss={handleDismissDirectSave}
-            />
-          )}
+          <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
+            {successToast && (
+              <div className="px-4 py-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/80 text-emerald-900 dark:text-emerald-200 text-xs sm:text-sm font-medium rounded-xl flex items-center gap-2.5 animate-fadeIn">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span>{successToast}</span>
+              </div>
+            )}
 
-          {/* Loading Skeleton Grid matching contact-sheet cards */}
-          {isLoading && images.length === 0 && (
-            <div
-              aria-label="Extracting images"
-              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5"
-            >
-              {Array.from({ length: 8 }).map((_, idx) => (
-                <div
-                  key={idx}
-                  className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden animate-pulse"
+            {errorMessage && (
+              <div className="px-4 py-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/80 text-rose-900 dark:text-rose-200 text-xs sm:text-sm font-medium rounded-xl flex items-center gap-2.5 animate-fadeIn">
+                <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                <span className="flex-1">{errorMessage}</span>
+                <button
+                  type="button"
+                  onClick={() => setErrorMessage(null)}
+                  className="text-xs underline hover:no-underline shrink-0 cursor-pointer"
                 >
-                  <div className="aspect-[4/3] bg-zinc-200/70 dark:bg-zinc-800/60" />
-                  <div className="p-3.5 space-y-2.5">
-                    <div className="h-3.5 w-3/4 bg-zinc-200 dark:bg-zinc-800 rounded" />
-                    <div className="h-3 w-1/2 bg-zinc-100 dark:bg-zinc-800/70 rounded" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                  Dismiss
+                </button>
+              </div>
+            )}
 
-          {/* Studio Workflow Primer — visible only before first extraction */}
-          {!isLoading && images.length === 0 && (
-            <section className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
-              <div className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 flex flex-col justify-between gap-4">
-                <div>
-                  <div className="text-xs font-mono text-zinc-400 dark:text-zinc-500">01.</div>
-                  <h3 className="font-display text-base font-bold text-zinc-950 dark:text-white mt-1.5">
-                    Un-shrink & Crawl Subpages
-                  </h3>
-                  <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 mt-1.5 leading-relaxed">
-                    Parses srcset descriptors, strips CDN resize queries, and follows linked detail pages to uncover true high-resolution masters.
-                  </p>
-                </div>
-                {firstSamplePreset && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleScrape(firstSamplePreset.url, firstSamplePreset.html, true, relayUrl)
-                    }
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline self-start cursor-pointer"
-                  >
-                    <span>Run Nature Sample</span>
-                    <ArrowUpRight className="w-3.5 h-3.5" />
-                  </button>
+            {geoNotice && (
+              <div className="px-4 py-3 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/80 text-amber-950 dark:text-amber-200 text-xs sm:text-sm font-medium rounded-xl flex items-center gap-2.5 animate-fadeIn">
+                <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span className="flex-1">{geoNotice}</span>
+                <button
+                  type="button"
+                  onClick={() => setGeoNotice(null)}
+                  className="text-xs underline hover:no-underline shrink-0 cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {/* Tab 1: Scraper & Contact-Sheet Studio */}
+            <motion.div
+              key={`panel-${activeTab}`}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+              className="space-y-6"
+            >
+              <div
+                id="tabpanel-scraper"
+                role="tabpanel"
+                hidden={activeTab !== 'scraper'}
+                className={activeTab === 'scraper' ? 'space-y-6' : 'hidden'}
+              >
+                <ScraperControls
+                  onScrape={handleScrape}
+                  onDiscoverNestedGalleries={handleDiscoverNestedGalleries}
+                  onFetchInstagramProfile={handleFetchInstagramProfile}
+                  isLoading={isLoading}
+                  isDiscoveringNested={isDiscoveringNested}
+                  isCrawlingNested={nestedCrawlProgress.isCrawling}
+                  currentUrl={sourceUrl}
+                  relayUrl={relayUrl}
+                  onRelayUrlChange={setRelayUrl}
+                  geoBlocked={isGeoBlocked}
+                  instagramSession={instagramSession}
+                  onInstagramSessionChange={setInstagramSession}
+                  instagramMaxPosts={instagramMaxPosts}
+                  onInstagramMaxPostsChange={setInstagramMaxPosts}
+                  instagramLoginRequired={isInstagramLoginRequired}
+                  requestedMode={requestedMode}
+                  onModeHandled={() => setRequestedMode(null)}
+                  compactHeader={images.length > 0 || Boolean(nestedDiscovery)}
+                />
+
+                {nestedDiscovery && nestedDiscovery.galleries.length > 0 && (
+                  <NestedGalleryQueue
+                    parentUrl={nestedDiscovery.parentUrl}
+                    parentTitle={nestedDiscovery.parentTitle}
+                    galleries={nestedDiscovery.galleries}
+                    selectedIds={selectedNestedIds}
+                    onToggleSelect={handleToggleNestedSelect}
+                    onSelectAll={handleSelectAllNested}
+                    onScrapeSelected={handleScrapeSelectedNested}
+                    onCancelCrawl={handleCancelNestedCrawl}
+                    onClear={handleClearNestedQueue}
+                    crawlProgress={nestedCrawlProgress}
+                  />
+                )}
+
+                {progressiveState && (
+                  <ProgressiveDownloadBar
+                    progress={progressiveState}
+                    modeLabel={progressiveModeLabel}
+                    onCancel={handleCancelDirectSave}
+                    onRetryFailed={handleRetryFailedDirectSave}
+                    onDismiss={handleDismissDirectSave}
+                  />
+                )}
+
+                {/* Loading Skeleton Grid matching contact-sheet cards */}
+                {(isLoading || isDiscoveringNested) &&
+                  !nestedCrawlProgress.isCrawling &&
+                  images.length === 0 && (
+                    <div
+                      aria-label="Extracting images"
+                      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5"
+                    >
+                      {Array.from({ length: 8 }).map((_, idx) => (
+                        <div
+                          key={idx}
+                          className="bg-white dark:bg-[#111319] border border-[#E4E0D6] dark:border-white/[0.08] rounded-xl overflow-hidden animate-pulse"
+                        >
+                          <div className="aspect-[4/3] bg-[#EFECE4] dark:bg-zinc-800/60" />
+                          <div className="p-3.5 space-y-2.5">
+                            <div className="h-3.5 w-3/4 bg-[#EFECE4] dark:bg-zinc-800 rounded" />
+                            <div className="h-3 w-1/2 bg-[#F6F5F1] dark:bg-zinc-800/70 rounded" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                {/* Asymmetric Bento Studio Hub — visible before first extraction or discovery */}
+                {!isLoading &&
+                  !isDiscoveringNested &&
+                  !nestedCrawlProgress.isCrawling &&
+                  !nestedDiscovery &&
+                  images.length === 0 && (
+                    <BentoShowcase
+                      onSelectTab={handleSelectTab}
+                      onRunNatureSample={
+                        firstSamplePreset
+                          ? () =>
+                              handleScrape(
+                                firstSamplePreset.url,
+                                firstSamplePreset.html,
+                                true,
+                                relayUrl
+                              )
+                          : undefined
+                      }
+                      onOpenInstagramMode={() => setRequestedMode('instagram')}
+                      onOpenHarvesterMode={() => setRequestedMode('harvester')}
+                    />
+                  )}
+
+                {images.length > 0 && (
+                  <GalleryView
+                    images={images}
+                    pageTitle={pageTitle}
+                    sourceUrl={sourceUrl}
+                    unshrunkCount={unshrunkCount}
+                    nestedGalleries={nestedSummaries}
+                    onSelectImage={setSelectedImage}
+                    onBatchDownloadZip={handleBatchDownloadZip}
+                    onDownloadIndividually={handleDownloadIndividually}
+                    isDownloadingZip={isDownloadingZip}
+                    isDirectSaving={Boolean(progressiveState?.isRunning)}
+                    downloadProgress={downloadProgress}
+                    hasMorePosts={Boolean(instagramContinuation?.hasMore)}
+                    isLoadingMorePosts={isLoadingMorePosts}
+                    onLoadMorePosts={handleLoadMoreInstagramPosts}
+                    totalProfilePosts={instagramContinuation?.totalProfilePosts}
+                    onSendToCropResize={(targets) => {
+                      setCropSeedImages(targets);
+                      handleSelectTab('crop');
+                    }}
+                    onSendToFilterStudio={(targets) => {
+                      setFilterSeedImages(targets);
+                      handleSelectTab('filters');
+                    }}
+                    onSendToGifMaker={(targets) => {
+                      setGifSeedImages(targets);
+                      handleSelectTab('gif');
+                    }}
+                    onSendToHumanClassifier={(targets) => {
+                      setClassifierSeedImages(targets);
+                      handleSelectTab('classifier');
+                    }}
+                    onSendToGemmaCaptioner={(targets) => {
+                      setGemmaSeedImages(targets);
+                      handleSelectTab('gemma');
+                    }}
+                  />
                 )}
               </div>
 
-              <div className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 flex flex-col justify-between gap-4">
-                <div>
-                  <div className="text-xs font-mono text-zinc-400 dark:text-zinc-500">02.</div>
-                  <h3 className="font-display text-base font-bold text-zinc-950 dark:text-white mt-1.5">
-                    Instagram Profiles & Carousels
-                  </h3>
-                  <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 mt-1.5 leading-relaxed">
-                    Extracts public grids & multi-slide carousels cleanly, or pass a sessionid cookie to paginate full timelines and resume batches.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setRequestedMode('instagram')}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline self-start cursor-pointer"
-                >
-                  <span>Open Instagram Extractor</span>
-                  <ArrowUpRight className="w-3.5 h-3.5" />
-                </button>
+              {/* Tab 2: Batch Directory Crop & Resize Studio */}
+              <div
+                id="tabpanel-crop"
+                role="tabpanel"
+                hidden={activeTab !== 'crop'}
+                className={activeTab === 'crop' ? 'block' : 'hidden'}
+              >
+                <CropResizeStudio
+                  seededScrapedImages={cropSeedImages}
+                  seededSourceUrl={sourceUrl}
+                  onClearSeeded={handleClearCropSeed}
+                  onNotify={showToast}
+                />
               </div>
 
-              <div className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 flex flex-col justify-between gap-4">
-                <div>
-                  <div className="text-xs font-mono text-zinc-400 dark:text-zinc-500">03.</div>
-                  <h3 className="font-display text-base font-bold text-zinc-950 dark:text-white mt-1.5">
-                    Progressive Save &amp; Open-Tab Harvester
-                  </h3>
-                  <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 mt-1.5 leading-relaxed">
-                    Save masters directly in parallel streams, export filtered link lists, or harvest geo-blocked galleries straight from your browser tab.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setRequestedMode('harvester')}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline self-start cursor-pointer"
-                >
-                  <span>Open-Tab Harvester</span>
-                  <ArrowUpRight className="w-3.5 h-3.5" />
-                </button>
+              {/* Tab 3: Image Filter & Snapchat Lens Studio */}
+              <div
+                id="tabpanel-filters"
+                role="tabpanel"
+                hidden={activeTab !== 'filters'}
+                className={activeTab === 'filters' ? 'block' : 'hidden'}
+              >
+                <FilterStudio
+                  seededScrapedImages={filterSeedImages}
+                  seededSourceUrl={sourceUrl}
+                  onClearSeeded={handleClearFilterSeed}
+                  onNotify={showToast}
+                />
               </div>
-            </section>
-          )}
 
-          {images.length > 0 && (
-            <GalleryView
-              images={images}
-              pageTitle={pageTitle}
-              sourceUrl={sourceUrl}
-              unshrunkCount={unshrunkCount}
-              onSelectImage={setSelectedImage}
-              onBatchDownloadZip={handleBatchDownloadZip}
-              onDownloadIndividually={handleDownloadIndividually}
-              isDownloadingZip={isDownloadingZip}
-              isDirectSaving={Boolean(progressiveState?.isRunning)}
-              downloadProgress={downloadProgress}
-              hasMorePosts={Boolean(instagramContinuation?.hasMore)}
-              isLoadingMorePosts={isLoadingMorePosts}
-              onLoadMorePosts={handleLoadMoreInstagramPosts}
-              totalProfilePosts={instagramContinuation?.totalProfilePosts}
-              onSendToCropResize={(targets) => {
-                setCropSeedImages(targets);
-                handleSelectTab('crop');
-              }}
-              onSendToHumanClassifier={(targets) => {
-                setClassifierSeedImages(targets);
-                handleSelectTab('classifier');
-              }}
-            />
-          )}
-        </div>
+              {/* Tab 4: Animated GIF Maker Studio */}
+              <div
+                id="tabpanel-gif"
+                role="tabpanel"
+                hidden={activeTab !== 'gif'}
+                className={activeTab === 'gif' ? 'block' : 'hidden'}
+              >
+                <GifMakerStudio
+                  seededScrapedImages={gifSeedImages}
+                  seededSourceUrl={sourceUrl}
+                  onClearSeeded={handleClearGifSeed}
+                  onNotify={showToast}
+                />
+              </div>
 
-        {/* Tab 2: Batch Directory Crop & Resize Studio */}
-        <div
-          id="tabpanel-crop"
-          role="tabpanel"
-          hidden={activeTab !== 'crop'}
-          className={activeTab === 'crop' ? 'block' : 'hidden'}
-        >
-          <CropResizeStudio
-            seededScrapedImages={cropSeedImages}
-            seededSourceUrl={sourceUrl}
-            onClearSeeded={handleClearCropSeed}
-            onNotify={showToast}
+              {/* Tab 5: AI Human Identity Classifier */}
+              <div
+                id="tabpanel-classifier"
+                role="tabpanel"
+                hidden={activeTab !== 'classifier'}
+                className={activeTab === 'classifier' ? 'block' : 'hidden'}
+              >
+                <HumanClassifierStudio
+                  seededScrapedImages={classifierSeedImages}
+                  seededSourceUrl={sourceUrl}
+                  onClearSeeded={handleClearClassifierSeed}
+                  onNotify={showToast}
+                />
+              </div>
+
+              {/* Tab 6: Gemma 4 Multimodal Chat & Auto-Captioner */}
+              <div
+                id="tabpanel-gemma"
+                role="tabpanel"
+                hidden={activeTab !== 'gemma'}
+                className={activeTab === 'gemma' ? 'block' : 'hidden'}
+              >
+                <GemmaStudio
+                  seededScrapedImages={gemmaSeedImages}
+                  seededSourceUrl={sourceUrl}
+                  onClearSeeded={handleClearGemmaSeed}
+                  onNotify={showToast}
+                />
+              </div>
+
+              {/* Tab 7: Setup & Deployment Instructions */}
+              <div
+                id="tabpanel-docs"
+                role="tabpanel"
+                hidden={activeTab !== 'docs'}
+                className={activeTab === 'docs' ? 'block' : 'hidden'}
+              >
+                <DeploymentDocs />
+              </div>
+            </motion.div>
+          </main>
+
+          <LightboxModal
+            image={selectedImage}
+            images={images}
+            sourcePageUrl={sourceUrl}
+            onClose={() => setSelectedImage(null)}
+            onNavigate={handleNavigateLightbox}
+            onDeepResolve={handleDeepResolve}
           />
-        </div>
 
-        {/* Tab 3: AI Human Identity Classifier */}
-        <div
-          id="tabpanel-classifier"
-          role="tabpanel"
-          hidden={activeTab !== 'classifier'}
-          className={activeTab === 'classifier' ? 'block' : 'hidden'}
-        >
-          <HumanClassifierStudio
-            seededScrapedImages={classifierSeedImages}
-            seededSourceUrl={sourceUrl}
-            onClearSeeded={handleClearClassifierSeed}
-            onNotify={showToast}
+          <CommandPalette
+            isOpen={isCommandPaletteOpen}
+            onClose={() => setIsCommandPaletteOpen(false)}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+            onSelectTab={handleSelectTab}
+            onRunNatureSample={() => {
+              if (firstSamplePreset) {
+                handleScrape(firstSamplePreset.url, firstSamplePreset.html, true, relayUrl);
+              }
+            }}
+            onOpenNestedMode={() => setRequestedMode('nested')}
+            onOpenInstagramMode={() => setRequestedMode('instagram')}
+            onExportProjectZip={handleExportProjectZip}
           />
-        </div>
 
-        {/* Tab 4: Setup & Deployment Instructions */}
-        <div
-          id="tabpanel-docs"
-          role="tabpanel"
-          hidden={activeTab !== 'docs'}
-          className={activeTab === 'docs' ? 'block' : 'hidden'}
-        >
-          <DeploymentDocs />
+          <footer className="mt-auto border-t border-[#E4E0D6] dark:border-white/[0.08] py-4 px-4 sm:px-6 lg:px-8 bg-[#FBFBF9] dark:bg-[#0D0F14] transition-colors">
+            <div className="max-w-[1440px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+              <div className="flex items-center gap-2">
+                <span className="font-display font-semibold text-[#141413] dark:text-zinc-200">
+                  FullRes
+                </span>
+                <span aria-hidden="true">·</span>
+                <span>High-Resolution Image Extractor &amp; Post-Production Suite</span>
+              </div>
+              <div className="font-mono text-[11px]">
+                Press ⌘K to switch studios or launch actions
+              </div>
+            </div>
+          </footer>
         </div>
-      </main>
-
-      <LightboxModal
-        image={selectedImage}
-        images={images}
-        sourcePageUrl={sourceUrl}
-        onClose={() => setSelectedImage(null)}
-        onNavigate={handleNavigateLightbox}
-        onDeepResolve={handleDeepResolve}
-      />
-
-      <footer className="mt-auto border-t border-zinc-200/80 dark:border-zinc-800/80 py-5 bg-white dark:bg-[#0D0F16] transition-colors">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-zinc-500 dark:text-zinc-400">
-          <div className="flex items-center gap-2">
-            <span className="font-display font-semibold text-zinc-800 dark:text-zinc-200">
-              FullRes
-            </span>
-            <span aria-hidden="true">·</span>
-            <span>High-Resolution Image Extractor &amp; Contact-Sheet Studio</span>
-          </div>
-          <div>Contact-sheet previewer, link harvester, and batch ZIP packager</div>
-        </div>
-      </footer>
-    </div>
+      </div>
+    </MotionConfig>
   );
 }

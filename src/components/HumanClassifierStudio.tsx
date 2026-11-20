@@ -96,7 +96,7 @@ async function encodeImageUrlToThumbnailBase64(
         return;
       }
       ctx.drawImage(img, 0, 0, targetW, targetH);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.84);
       const base64Data = dataUrl.split(',')[1] || '';
       resolve({ mimeType: 'image/jpeg', base64Data });
     };
@@ -348,49 +348,41 @@ export const HumanClassifierStudio: React.FC<HumanClassifierStudioProps> = ({
     setProgressCounts({ done: 0, total: items.length });
 
     try {
-      const batches = chunkItemsForAnalysis(items, 5);
+      const batches = chunkItemsForAnalysis(items, 8);
       const collectedProfiles: HumanImageBiometricProfile[] = [];
       let completedCount = 0;
 
-      const CONCURRENCY = 3;
-      for (let i = 0; i < batches.length; i += CONCURRENCY) {
+      for (const batch of batches) {
         if (controller.signal.aborted) {
           throw new Error('Classification cancelled.');
         }
 
-        const wave = batches.slice(i, i + CONCURRENCY);
-        const waveProfiles = await Promise.all(
-          wave.map(async (batch) => {
-            const encodedBatch = await Promise.all(
-              batch.map(async (item) => {
-                const encoded = await encodeImageUrlToThumbnailBase64(item.previewUrl, 512);
-                return {
-                  imageId: item.id,
-                  filename: item.filename,
-                  mimeType: encoded.mimeType,
-                  base64Data: encoded.base64Data,
-                };
-              })
-            );
-
-            const { ok, data, error } = await fetchApiJson('/api/ai/classify-humans/analyze-batch', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ images: encodedBatch }),
-              signal: controller.signal,
-            });
-
-            if (!ok || !data?.profiles) {
-              throw new Error(data?.error || error || 'AI batch analysis failed.');
-            }
-            return data.profiles as HumanImageBiometricProfile[];
+        const encodedBatch = await Promise.all(
+          batch.map(async (item) => {
+            const encoded = await encodeImageUrlToThumbnailBase64(item.previewUrl, 960);
+            return {
+              imageId: item.id,
+              filename: item.filename,
+              mimeType: encoded.mimeType,
+              base64Data: encoded.base64Data,
+            };
           })
         );
 
-        for (const profList of waveProfiles) {
-          collectedProfiles.push(...profList);
-          completedCount += profList.length;
+        const { ok, data, error } = await fetchApiJson('/api/ai/classify-humans/analyze-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ images: encodedBatch }),
+          signal: controller.signal,
+        });
+
+        if (!ok || !data?.profiles) {
+          throw new Error(data?.error || error || 'Offline Python AI batch analysis failed.');
         }
+
+        const profList = data.profiles as HumanImageBiometricProfile[];
+        collectedProfiles.push(...profList);
+        completedCount += profList.length;
         setProgressCounts({ done: completedCount, total: items.length });
       }
 
@@ -832,10 +824,10 @@ export const HumanClassifierStudio: React.FC<HumanClassifierStudioProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5 mb-6">
           <div className="max-w-2xl">
             <h1 className="font-display text-2xl sm:text-3xl font-bold text-zinc-950 dark:text-zinc-50 tracking-tight leading-[1.15] [text-wrap:balance]">
-              Classify humans by facial structure &amp; body proportions.
+              Classify humans offline by facial structure &amp; body proportions.
             </h1>
             <p className="text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed mt-2">
-              Drop up to 200+ random photos or point to a disk directory. AI Vision analyzes cranial geometry, jawline, cheekbones, and somatic proportions, then outputs each unique individual into a dedicated folder.
+              Drop up to 200+ random photos or point to a disk directory. Runs 100% locally offline via Python AI (InsightFace ArcFace, 68-pt facial landmarks, MediaPipe 3D pose, and Scikit-Learn clustering) with zero cloud APIs or quotas.
             </p>
           </div>
 
@@ -1098,7 +1090,10 @@ export const HumanClassifierStudio: React.FC<HumanClassifierStudioProps> = ({
 
       {/* Error & Status Feedback */}
       {errorMsg && (
-        <div className="px-4 py-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/80 text-rose-900 dark:text-rose-200 text-xs sm:text-sm font-medium rounded-xl flex items-center gap-2.5">
+        <div
+          role="alert"
+          className="px-4 py-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/80 text-rose-900 dark:text-rose-200 text-xs sm:text-sm font-medium rounded-xl flex items-center gap-2.5"
+        >
           <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
           <span className="flex-1">{errorMsg}</span>
           <button

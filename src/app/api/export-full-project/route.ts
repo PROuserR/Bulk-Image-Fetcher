@@ -8,7 +8,17 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     const zip = new JSZip();
-    const excluded = new Set(['node_modules', '.git', '.next', 'dist', '.playwright-cli']);
+    const excluded = new Set([
+      'node_modules',
+      '.git',
+      '.next',
+      'dist',
+      '.playwright-cli',
+      '.venv',
+      'venv',
+      'models',
+      '__pycache__',
+    ]);
     addDirectoryToZip(process.cwd(), zip, excluded);
 
     const zipBuf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
