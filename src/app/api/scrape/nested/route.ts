@@ -50,6 +50,7 @@ export async function POST(req: NextRequest) {
     } else {
       let html = '';
       let isLiveFetch = false;
+      let usedNonUkRelay = false;
       if (customHtml && String(customHtml).trim()) {
         html = String(customHtml);
         parentUrl = targetUrl ? normalizeGalleryFetchUrl(targetUrl) : 'https://nested-hub.local/';
@@ -61,6 +62,7 @@ export async function POST(req: NextRequest) {
         } else {
           const normalized = normalizeGalleryFetchUrl(targetUrl);
           const fetchRes = await fetchHtmlWithFallback(normalized, relayUrl, 16000);
+          usedNonUkRelay = Boolean(fetchRes.usedNonUkRelay);
           if (!fetchRes.ok) {
             return NextResponse.json(
               { error: `Parent hub returned HTTP ${fetchRes.status}` },
@@ -104,7 +106,8 @@ export async function POST(req: NextRequest) {
           const extraHtmls = await Promise.all(
             hubPages.map(async (pageHref) => {
               try {
-                const res = await fetchHtmlWithFallback(pageHref, relayUrl, 12000);
+                const res = await fetchHtmlWithFallback(pageHref, relayUrl, 12000, usedNonUkRelay);
+                if (res.usedNonUkRelay) usedNonUkRelay = true;
                 return res.ok && !isGeoBlockedHtml(res.html, res.url)
                   ? { html: res.html, url: res.url || pageHref }
                   : null;

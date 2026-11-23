@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
     let geoBlocked = false;
     let notice: string | undefined;
     let isLiveFetch = false;
+    let usedNonUkRelay = false;
 
     if (customHtml && String(customHtml).trim()) {
       html = String(customHtml);
@@ -56,6 +57,7 @@ export async function POST(req: NextRequest) {
       } else {
         const normalizedUrl = normalizeGalleryFetchUrl(targetUrl);
         const fetchRes = await fetchHtmlWithFallback(normalizedUrl, relayUrl, 16000);
+        usedNonUkRelay = Boolean(fetchRes.usedNonUkRelay);
         if (!fetchRes.ok) {
           return NextResponse.json(
             {
@@ -103,7 +105,8 @@ export async function POST(req: NextRequest) {
         const extraHtmls = await Promise.all(
           hubPages.map(async (pageHref) => {
             try {
-              const res = await fetchHtmlWithFallback(pageHref, relayUrl, 12000);
+              const res = await fetchHtmlWithFallback(pageHref, relayUrl, 12000, usedNonUkRelay);
+              if (res.usedNonUkRelay) usedNonUkRelay = true;
               return res.ok && !isGeoBlockedHtml(res.html, res.url)
                 ? { html: res.html, url: res.url || pageHref }
                 : null;
@@ -136,14 +139,15 @@ export async function POST(req: NextRequest) {
       galleries = await resolveDiscoveredGalleriesIntermediateLinks(
         galleries,
         async (itemUrl, timeoutMs) => {
-          const res = await fetchHtmlWithFallback(itemUrl, relayUrl, timeoutMs);
+          const res = await fetchHtmlWithFallback(itemUrl, relayUrl, timeoutMs, usedNonUkRelay);
+          if (res.usedNonUkRelay) usedNonUkRelay = true;
           return {
             ok: res.ok,
             url: res.url,
             html: res.html,
           };
         },
-        { maxToResolve: 20, concurrency: 5 }
+        { maxToResolve: 20, concurrency: usedNonUkRelay ? 2 : 5 }
       );
     }
 

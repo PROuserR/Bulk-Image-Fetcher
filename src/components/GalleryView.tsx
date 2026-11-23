@@ -27,12 +27,15 @@ import {
   Film,
   FolderTree,
   List,
+  AlertCircle,
+  ScanFace,
 } from 'lucide-react';
 import {
   ScrapedImage,
   GalleryFilterState,
   DEFAULT_GALLERY_FILTERS,
   PreviewStateInfo,
+  FaceScanResult,
   OrientationFilter,
   isMasterImage,
   isBlankOrPlaceholderUrl,
@@ -47,9 +50,16 @@ import {
   triggerTextDownload,
   buildDownloadFileUrl,
   buildViewImageUrl,
+  ArchiveFormat,
+  DEFAULT_ARCHIVE_FORMAT,
 } from '../utils/downloader';
+import {
+  buildProxyImageUrl,
+  registerWorkingPreviewUrl,
+} from '../utils/clientImageCache';
+import type { ArchiveDownloadProgress } from '../utils/archiveDownloader';
 import { FullImageLinksModal } from './FullImageLinksModal';
-import { FilterChipsRow, BooleanFilterKey } from './FilterStackBar';
+import { FilterChipsRow, BooleanFilterKey, FaceScanStatusSummary } from './FilterStackBar';
 
 interface GalleryViewProps {
   images: ScrapedImage[];
@@ -58,7 +68,7 @@ interface GalleryViewProps {
   unshrunkCount: number;
   nestedGalleries?: NestedGallerySummary[];
   onSelectImage: (image: ScrapedImage) => void;
-  onBatchDownloadZip: (selectedImages: ScrapedImage[]) => void;
+  onBatchDownloadZip: (selectedImages: ScrapedImage[], format?: ArchiveFormat) => void;
   onDownloadIndividually?: (
     selectedImages: ScrapedImage[],
     options?: { saveToFolder?: boolean }
@@ -66,6 +76,16 @@ interface GalleryViewProps {
   isDownloadingZip: boolean;
   isDirectSaving?: boolean;
   downloadProgress?: string | null;
+  archiveProgress?: ArchiveDownloadProgress | null;
+  onPauseArchiveDownload?: () => void;
+  onResumeArchiveDownload?: () => void;
+  onCancelArchiveDownload?: () => void;
+  onDismissArchiveDownload?: () => void;
+  archiveFormat?: ArchiveFormat;
+  onArchiveFormatChange?: (format: ArchiveFormat) => void;
+  faceScanMap?: Record<string, FaceScanResult>;
+  faceScanStatus?: FaceScanStatusSummary;
+  onScanHumanFaces?: (targetImages: ScrapedImage[]) => Promise<boolean>;
   hasMorePosts?: boolean;
   isLoadingMorePosts?: boolean;
   onLoadMorePosts?: () => void;
@@ -79,21 +99,25 @@ interface GalleryViewProps {
 
 interface GalleryCardProps {
   img: ScrapedImage;
+  cardIndex: number;
   sourceUrl: string;
   isSelected: boolean;
   aspectMode: 'wide' | 'contact';
   previewInfo?: PreviewStateInfo;
+  faceScan?: FaceScanResult;
   onToggleSelect: (id: string, e: React.MouseEvent) => void;
   onSelectImage: (img: ScrapedImage) => void;
   onPreviewUpdate: (id: string, info: PreviewStateInfo) => void;
 }
 
-const GalleryCard: React.FC<GalleryCardProps> = ({
+const GalleryCard: React.FC<GalleryCardProps> = React.memo(({
   img,
+  cardIndex,
   sourceUrl,
   isSelected,
   aspectMode,
   previewInfo,
+  faceScan,
   onToggleSelect,
   onSelectImage,
   onPreviewUpdate,
@@ -115,7 +139,7 @@ const GalleryCard: React.FC<GalleryCardProps> = ({
     addCandidate(img.fallbackUrl);
     const proxyTarget = img.fullUrl || img.thumbnailUrl;
     if (proxyTarget && !isBlankOrPlaceholderUrl(proxyTarget)) {
-      const proxyUrl = `/api/proxy?url=${encodeURIComponent(proxyTarget)}&referer=${encodeURIComponent(sourceUrl || '')}`;
+      const proxyUrl = buildProxyImageUrl(proxyTarget, sourceUrl || '');
       if (!urls.includes(proxyUrl)) urls.push(proxyUrl);
     }
     return urls;
@@ -168,13 +192,18 @@ const GalleryCard: React.FC<GalleryCardProps> = ({
           <img
             src={activeSrc}
             alt={img.altText}
-            loading="eager"
+            loading={cardIndex < 12 ? 'eager' : 'lazy'}
+            decoding="async"
+            fetchPriority={cardIndex < 8 ? 'high' : 'auto'}
             referrerPolicy="no-referrer"
             onLoad={(e) => {
               const target = e.currentTarget;
               if (target.naturalWidth <= 1 || target.naturalHeight <= 1) {
                 advanceFallback();
                 return;
+              }
+              if (activeSrc && (img.fullUrl || img.thumbnailUrl)) {
+                registerWorkingPreviewUrl(img.fullUrl || img.thumbnailUrl, activeSrc);
               }
               onPreviewUpdate(img.id, {
                 status: 'loaded',
@@ -267,6 +296,25 @@ const GalleryCard: React.FC<GalleryCardProps> = ({
                 </span>
               </>
             ) : null}
+            {faceScan && !faceScan.error && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span
+                  title={faceScan.subjectSummary}
+                  className={`font-sans font-semibold ${
+                    faceScan.hasHumanFace
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-amber-600 dark:text-amber-400'
+                  }`}
+                >
+                  {faceScan.hasHumanFace
+                    ? faceScan.faceCount > 1
+                      ? `${faceScan.faceCount} Faces`
+                      : 'Face'
+                    : 'No Face'}
+                </span>
+              </>
+            )}
           </div>
 
           {img.galleryTitle && (
@@ -352,7 +400,9 @@ const GalleryCard: React.FC<GalleryCardProps> = ({
       </div>
     </article>
   );
-};
+});
+
+GalleryCard.displayName = 'GalleryCard';
 
 export const GalleryView: React.FC<GalleryViewProps> = ({
   images,
@@ -366,6 +416,16 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   isDownloadingZip,
   isDirectSaving = false,
   downloadProgress,
+  archiveProgress = null,
+  onPauseArchiveDownload,
+  onResumeArchiveDownload,
+  onCancelArchiveDownload,
+  onDismissArchiveDownload,
+  archiveFormat,
+  onArchiveFormatChange,
+  faceScanMap,
+  faceScanStatus,
+  onScanHumanFaces,
   hasMorePosts = false,
   isLoadingMorePosts = false,
   onLoadMorePosts,
@@ -382,11 +442,19 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   const [isLinksModalOpen, setIsLinksModalOpen] = useState<boolean>(false);
   const [aspectMode, setAspectMode] = useState<'wide' | 'contact'>('contact');
   const [groupByGallery, setGroupByGallery] = useState<boolean>(true);
+  const [canPickFolder, setCanPickFolder] = useState<boolean>(false);
+  const [localArchiveFormat, setLocalArchiveFormat] = useState<ArchiveFormat>(DEFAULT_ARCHIVE_FORMAT);
+  const activeArchiveFormat = archiveFormat ?? localArchiveFormat;
+  const setActiveArchiveFormat = onArchiveFormatChange ?? setLocalArchiveFormat;
+
+  useEffect(() => {
+    setCanPickFolder('showDirectoryPicker' in window && window.self === window.top);
+  }, []);
 
   useEffect(() => {
     setPreviewMap({});
     setSelectedIds(new Set());
-    setFilters((prev) => ({ ...prev, galleryId: 'all' }));
+    setFilters((prev) => ({ ...prev, galleryId: 'all', onlyHumanFaces: false }));
   }, [sourceUrl]);
 
   useEffect(() => {
@@ -399,6 +467,24 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
       return next.size === prev.size ? prev : next;
     });
   }, [images]);
+
+  useEffect(() => {
+    if (!filters.onlyHumanFaces || !faceScanMap) return;
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        const scan = faceScanMap[id];
+        if (scan && !scan.hasHumanFace) {
+          changed = true;
+        } else {
+          next.add(id);
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [filters.onlyHumanFaces, faceScanMap]);
 
   const handlePreviewUpdate = useCallback((id: string, info: PreviewStateInfo) => {
     setPreviewMap((prev) => {
@@ -423,6 +509,27 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   };
 
   const toggleFilterBool = (key: BooleanFilterKey) => {
+    if (key === 'onlyHumanFaces') {
+      if (filters.onlyHumanFaces) {
+        setFilters((prev) => ({ ...prev, onlyHumanFaces: false }));
+        return;
+      }
+      const unscanned = images.filter(
+        (img) =>
+          !isBlankOrPlaceholderUrl(img.thumbnailUrl || img.fullUrl) &&
+          (!faceScanMap?.[img.id] || Boolean(faceScanMap?.[img.id]?.error))
+      );
+      if (unscanned.length > 0 && onScanHumanFaces) {
+        void onScanHumanFaces(images).then((ok) => {
+          if (ok) {
+            setFilters((prev) => ({ ...prev, onlyHumanFaces: true }));
+          }
+        });
+        return;
+      }
+      setFilters((prev) => ({ ...prev, onlyHumanFaces: true }));
+      return;
+    }
     setFilters((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
@@ -441,11 +548,14 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
     setFilters(DEFAULT_GALLERY_FILTERS);
   };
 
-  const facets = useMemo(() => getFilterFacetCounts(images, previewMap), [images, previewMap]);
+  const facets = useMemo(
+    () => getFilterFacetCounts(images, previewMap, faceScanMap),
+    [images, previewMap, faceScanMap]
+  );
 
   const filteredImages = useMemo(
-    () => filterScrapedImages(images, filters, previewMap),
-    [images, filters, previewMap]
+    () => filterScrapedImages(images, filters, previewMap, faceScanMap),
+    [images, filters, previewMap, faceScanMap]
   );
 
   const activeFilterCount = useMemo(() => countActiveFilters(filters), [filters]);
@@ -468,16 +578,18 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   const isAllMastersSelected =
     filteredMasters.length > 0 && filteredMasters.every((img) => selectedIds.has(img.id));
 
-  const toggleSelect = (id: string, e: React.MouseEvent) => {
+  const toggleSelect = useCallback((id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const next = new Set(selectedIds);
-    if (next.has(id)) {
-      next.delete(id);
-    } else {
-      next.add(id);
-    }
-    setSelectedIds(next);
-  };
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
 
   const handleSelectFullMasters = () => {
     const next = new Set(selectedIds);
@@ -513,7 +625,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   const handleBatchDownload = () => {
     const selected = images.filter((img) => selectedIds.has(img.id));
     if (selected.length > 0) {
-      onBatchDownloadZip(selected);
+      onBatchDownloadZip(selected, activeArchiveFormat);
     }
   };
 
@@ -706,6 +818,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                 filters={filters}
                 facets={facets}
                 onToggle={toggleFilterBool}
+                faceScanStatus={faceScanStatus}
               />
             </div>
 
@@ -737,6 +850,16 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               )}
             </div>
           </div>
+
+          {faceScanStatus?.error && (
+            <div
+              role="alert"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-50 dark:bg-rose-950/35 border border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 text-xs"
+            >
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{faceScanStatus.error}</span>
+            </div>
+          )}
 
           <div className="pt-2.5 border-t border-zinc-100 dark:border-zinc-800/60 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3 flex-wrap">
@@ -882,10 +1005,6 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               selectedIds.size > 0
                 ? images.filter((img) => selectedIds.has(img.id))
                 : filteredImages;
-            const canPickFolder =
-              typeof window !== 'undefined' &&
-              'showDirectoryPicker' in window &&
-              window.self === window.top;
 
             return (
               <>
@@ -1033,6 +1152,40 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             </button>
           )}
 
+          {onScanHumanFaces && (
+            <button
+              type="button"
+              data-testid="toolbar-only-person-btn"
+              aria-pressed={filters.onlyHumanFaces}
+              disabled={images.length === 0 || Boolean(faceScanStatus?.isScanning)}
+              onClick={() => toggleFilterBool('onlyHumanFaces')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-40 ${
+                filters.onlyHumanFaces
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white border border-blue-600'
+                  : 'bg-blue-50/85 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/80 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/55'
+              }`}
+              title="Use AI vision to keep only images containing a person/human face and exclude nature or landscape backgrounds"
+            >
+              {faceScanStatus?.isScanning ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <ScanFace className="w-3.5 h-3.5" />
+              )}
+              <span className="tabular-nums">
+                {faceScanStatus?.isScanning
+                  ? `Scanning People (${faceScanStatus.scanned}/${faceScanStatus.total})...`
+                  : filters.onlyHumanFaces
+                    ? `Only Person · Exclude Landscape (${facets.humanFaces ?? 0})`
+                    : (facets.faceScanned ?? 0) > 0
+                      ? `Only Person · Exclude Landscape (${facets.humanFaces ?? 0})`
+                      : 'Only Person · Exclude Landscape (AI)'}
+              </span>
+              {filters.onlyHumanFaces && !faceScanStatus?.isScanning && (
+                <Check className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleExportJson}
@@ -1041,23 +1194,56 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             Export JSON
           </button>
 
-          <button
-            type="button"
-            onClick={handleBatchDownload}
-            disabled={selectedIds.size === 0 || isDownloadingZip}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-40 ${
-              selectedIds.size > 0
-                ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                : 'bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400'
-            }`}
-          >
-            <FileArchive className={`w-3.5 h-3.5 ${isDownloadingZip ? 'animate-bounce' : ''}`} />
-            <span className="tabular-nums">
-              {isDownloadingZip
-                ? downloadProgress || 'Packaging ZIP...'
-                : `Download Selected ZIP (${selectedIds.size})`}
-            </span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <div
+              role="group"
+              aria-label="Archive compression format"
+              className="inline-flex items-center p-0.5 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shrink-0"
+            >
+              {(['7z', 'zip'] as const).map((fmt) => (
+                <button
+                  key={fmt}
+                  type="button"
+                  onClick={() => setActiveArchiveFormat(fmt)}
+                  aria-pressed={activeArchiveFormat === fmt}
+                  disabled={isDownloadingZip}
+                  title={
+                    fmt === '7z'
+                      ? '7-Zip LZMA2 compression — smallest files (Default)'
+                      : 'Standard ZIP archive — universal compatibility'
+                  }
+                  className={`px-2 py-1 rounded-md text-[11px] font-semibold uppercase tracking-wide transition-colors cursor-pointer disabled:opacity-50 ${
+                    activeArchiveFormat === fmt
+                      ? 'bg-white dark:bg-[#1A1D26] text-zinc-950 dark:text-white shadow-xs'
+                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  {fmt.toUpperCase()}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleBatchDownload}
+              disabled={selectedIds.size === 0 || isDownloadingZip}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-40 ${
+                selectedIds.size > 0
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                  : 'bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400'
+              }`}
+              title={`Download selected images as a .${activeArchiveFormat.toUpperCase()} archive named after page title`}
+            >
+              <FileArchive className={`w-3.5 h-3.5 ${isDownloadingZip ? 'animate-bounce' : ''}`} />
+              <span className="tabular-nums">
+                {isDownloadingZip
+                  ? archiveProgress?.isRunning
+                    ? `${archiveProgress.percent}% · Packaging .${activeArchiveFormat.toUpperCase()}`
+                    : downloadProgress || `Packaging .${activeArchiveFormat.toUpperCase()}...`
+                  : `Download Selected .${activeArchiveFormat.toUpperCase()} (${selectedIds.size})`}
+              </span>
+            </button>
+          </div>
         </div>
       </section>
 
@@ -1131,14 +1317,16 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
-                  {section.items.map((img) => (
+                  {section.items.map((img, itemIdx) => (
                     <GalleryCard
                       key={img.id}
                       img={img}
+                      cardIndex={sIdx === 0 ? itemIdx : 12 + itemIdx}
                       sourceUrl={img.galleryUrl || sourceUrl}
                       aspectMode={aspectMode}
                       isSelected={selectedIds.has(img.id)}
                       previewInfo={previewMap[img.id]}
+                      faceScan={faceScanMap?.[img.id]}
                       onToggleSelect={toggleSelect}
                       onSelectImage={onSelectImage}
                       onPreviewUpdate={handlePreviewUpdate}
@@ -1151,14 +1339,16 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
-          {filteredImages.map((img) => (
+          {filteredImages.map((img, idx) => (
             <GalleryCard
               key={img.id}
               img={img}
+              cardIndex={idx}
               sourceUrl={img.galleryUrl || sourceUrl}
               aspectMode={aspectMode}
               isSelected={selectedIds.has(img.id)}
               previewInfo={previewMap[img.id]}
+              faceScan={faceScanMap?.[img.id]}
               onToggleSelect={toggleSelect}
               onSelectImage={onSelectImage}
               onPreviewUpdate={handlePreviewUpdate}
@@ -1205,8 +1395,18 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
         isDownloadingZip={isDownloadingZip}
         isDirectSaving={isDirectSaving}
         downloadProgress={downloadProgress}
+        archiveProgress={archiveProgress}
+        onPauseArchiveDownload={onPauseArchiveDownload}
+        onResumeArchiveDownload={onResumeArchiveDownload}
+        onCancelArchiveDownload={onCancelArchiveDownload}
+        onDismissArchiveDownload={onDismissArchiveDownload}
+        archiveFormat={activeArchiveFormat}
+        onArchiveFormatChange={setActiveArchiveFormat}
         initialFilters={filters}
         previewMap={previewMap}
+        faceScanMap={faceScanMap}
+        faceScanStatus={faceScanStatus}
+        onScanHumanFaces={onScanHumanFaces}
       />
     </div>
   );

@@ -3,6 +3,12 @@
  * cross-origin browser tab popups and centralizes viewer/download route links.
  */
 
+import {
+  dedupeImageBlobFetch,
+  getCachedImageBlob,
+  getFullResReusablePreviewUrl,
+} from './clientImageCache';
+
 export interface DownloadUrlOptions {
   fallbackUrl?: string;
   linkedPageUrl?: string;
@@ -27,6 +33,82 @@ export function triggerTextDownload(
 ): void {
   const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
   triggerBlobDownload(blob, filename);
+}
+
+export type ArchiveFormat = '7z' | 'zip';
+
+export const DEFAULT_ARCHIVE_FORMAT: ArchiveFormat = '7z';
+
+export function normalizeArchiveFormat(raw?: unknown): ArchiveFormat {
+  if (typeof raw === 'string' && raw.trim().toLowerCase() === 'zip') {
+    return 'zip';
+  }
+  return '7z';
+}
+
+export function getArchiveContentType(format: ArchiveFormat): string {
+  return format === 'zip' ? 'application/zip' : 'application/x-7z-compressed';
+}
+
+export function buildArchiveFilename(
+  pageTitle?: string,
+  fallbackUrl?: string,
+  format: ArchiveFormat = DEFAULT_ARCHIVE_FORMAT,
+  defaultName = 'scraped_images'
+): string {
+  const normalizedFormat = normalizeArchiveFormat(format);
+  let raw = (pageTitle || '').trim();
+  if (!raw || /^https?:\/\//i.test(raw)) {
+    const urlToParse = raw && /^https?:\/\//i.test(raw) ? raw : (fallbackUrl || '').trim();
+    if (urlToParse) {
+      try {
+        const parsed = new URL(urlToParse);
+        const segments = parsed.pathname.split('/').filter(Boolean);
+        const last = segments.length > 0 ? decodeURIComponent(segments[segments.length - 1]) : '';
+        raw =
+          last && !/^\d+$/.test(last)
+            ? last.replace(/[-_]+/g, ' ')
+            : parsed.hostname.replace(/^www\./i, '');
+      } catch {
+        // Keep raw fallback
+      }
+    }
+  }
+
+  let cleaned = raw
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\.(?:7z|zip)$/i, '')
+    .replace(/^[._\s-]+|[._\s-]+$/g, '')
+    .slice(0, 120)
+    .trim();
+
+  if (!cleaned) {
+    cleaned = defaultName;
+  }
+
+  return `${cleaned}.${normalizedFormat}`;
+}
+
+export function buildZipFilename(
+  pageTitle?: string,
+  fallbackUrl?: string,
+  defaultName = 'scraped_images'
+): string {
+  return buildArchiveFilename(pageTitle, fallbackUrl, 'zip', defaultName);
+}
+
+export function buildContentDispositionHeader(filename: string): string {
+  const defaultFallback = filename.toLowerCase().endsWith('.7z') ? 'archive.7z' : 'archive.zip';
+  const asciiFallback =
+    filename
+      .replace(/[^\x20-\x7e]/g, '-')
+      .replace(/["\\;\r\n]/g, '_')
+      .trim() || defaultFallback;
+  const encodedUtf8 = encodeURIComponent(filename);
+  return asciiFallback === filename
+    ? `attachment; filename="${asciiFallback}"`
+    : `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedUtf8}`;
 }
 
 export function buildDownloadFileUrl(
@@ -107,32 +189,49 @@ export async function downloadFileToDisk(
   referer?: string,
   options?: DownloadUrlOptions
 ): Promise<boolean> {
-  const downloadUrl = buildDownloadFileUrl(url, filename, referer, options);
-
-  // Strategy 1: Same-origin attachment proxy (supports Referer, linkedPageUrl, fallbackUrl, relayUrl)
-  const proxyBlob = await fetchValidImageBlob(downloadUrl, { timeoutMs: 12000 });
-  if (proxyBlob) {
-    triggerBlobDownload(proxyBlob, filename);
+  // Fast-path 0: Client in-memory LRU Blob cache (0 network round-trips)
+  const cachedBlob = getCachedImageBlob(url);
+  if (cachedBlob) {
+    triggerBlobDownload(cachedBlob, filename);
     return true;
   }
 
-  // Strategy 2: Direct browser CORS fetch (uses client IP/network if server was blocked)
-  const directBlob = await fetchValidImageBlob(url, { mode: 'cors', timeoutMs: 10000 });
-  if (directBlob) {
-    triggerBlobDownload(directBlob, filename);
-    return true;
-  }
-
-  // Strategy 3: Direct CORS fetch on fallbackUrl if provided
-  if (options?.fallbackUrl && options.fallbackUrl !== url) {
-    const fallbackBlob = await fetchValidImageBlob(options.fallbackUrl, {
-      mode: 'cors',
-      timeoutMs: 10000,
-    });
-    if (fallbackBlob) {
-      triggerBlobDownload(fallbackBlob, filename);
-      return true;
+  const resolvedBlob = await dedupeImageBlobFetch(url, async () => {
+    // Fast-path 1: Reuse already-loaded full-res preview via browser HTTP cache
+    const cachedPreviewUrl = getFullResReusablePreviewUrl(url);
+    if (cachedPreviewUrl) {
+      const cacheInit: RequestInit & { timeoutMs?: number } =
+        cachedPreviewUrl.startsWith('/api/')
+          ? { cache: 'force-cache', timeoutMs: 6000 }
+          : { mode: 'cors', cache: 'force-cache', timeoutMs: 6000 };
+      const reused = await fetchValidImageBlob(cachedPreviewUrl, cacheInit);
+      if (reused) return reused;
     }
+
+    // Strategy 2: Same-origin attachment proxy (supports Referer, linkedPageUrl, fallbackUrl, relayUrl)
+    const downloadUrl = buildDownloadFileUrl(url, filename, referer, options);
+    const proxyBlob = await fetchValidImageBlob(downloadUrl, { timeoutMs: 12000 });
+    if (proxyBlob) return proxyBlob;
+
+    // Strategy 3: Direct browser CORS fetch (uses client IP/network if server was blocked)
+    const directBlob = await fetchValidImageBlob(url, { mode: 'cors', timeoutMs: 10000 });
+    if (directBlob) return directBlob;
+
+    // Strategy 4: Direct CORS fetch on fallbackUrl if provided
+    if (options?.fallbackUrl && options.fallbackUrl !== url) {
+      const fallbackBlob = await fetchValidImageBlob(options.fallbackUrl, {
+        mode: 'cors',
+        timeoutMs: 10000,
+      });
+      if (fallbackBlob) return fallbackBlob;
+    }
+
+    return null;
+  });
+
+  if (resolvedBlob) {
+    triggerBlobDownload(resolvedBlob, filename);
+    return true;
   }
 
   return false;

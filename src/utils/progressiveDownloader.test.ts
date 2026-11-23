@@ -176,3 +176,71 @@ test('formatBytes formats byte sizes readably', () => {
   assert.equal(formatBytes(1536), '1.5 KB');
   assert.equal(formatBytes(2.5 * 1024 * 1024), '2.50 MB');
 });
+
+test('runProgressiveDownloads supports pause and resuming remaining items later without duplicate saves', async () => {
+  const items: DownloadItemInput[] = Array.from({ length: 5 }, (_, i) => ({
+    id: `p-${i}`,
+    url: `https://cdn.example.com/p-${i}.jpg`,
+    filename: `p-${i}.jpg`,
+  }));
+
+  const controller = new AbortController();
+  const savedFilesPhase1: string[] = [];
+
+  const mockFetchPhase1: FetchLike = async (url) => {
+    const isFirstTwo = url.includes('p-0.jpg') || url.includes('p-1.jpg');
+    await new Promise((r) => setTimeout(r, isFirstTwo ? 5 : 40));
+    return makeMockResponse(1000);
+  };
+
+  setTimeout(() => controller.abort('PAUSED'), 20);
+
+  const pausedSnapshot = await runProgressiveDownloads(items, {
+    concurrency: 2,
+    staggerMs: 0,
+    signal: controller.signal,
+    fetchFn: mockFetchPhase1,
+    saveBlobFn: (_blob, filename) => {
+      savedFilesPhase1.push(filename);
+    },
+  });
+
+  assert.equal(pausedSnapshot.isPaused, true);
+  assert.equal(pausedSnapshot.isCancelled, false);
+  assert.ok(pausedSnapshot.saved >= 1 && pausedSnapshot.saved < 5);
+  assert.equal(pausedSnapshot.failed, 0);
+
+  // Unfinished items remain pending rather than failed
+  for (const item of items) {
+    if (!pausedSnapshot.savedItemIds.includes(item.id)) {
+      assert.equal(pausedSnapshot.itemStatuses[item.id]?.status, 'pending');
+    }
+  }
+
+  // Resume later using savedItemIds from pausedSnapshot
+  const savedFilesPhase2: string[] = [];
+  const resumedResult = await runProgressiveDownloads(items, {
+    concurrency: 2,
+    staggerMs: 0,
+    initialProgress: {
+      savedItemIds: pausedSnapshot.savedItemIds,
+      bytesSaved: pausedSnapshot.bytesSaved,
+      itemStatuses: pausedSnapshot.itemStatuses,
+    },
+    fetchFn: async () => makeMockResponse(1000),
+    saveBlobFn: (_blob, filename) => {
+      savedFilesPhase2.push(filename);
+    },
+  });
+
+  assert.equal(resumedResult.isPaused, false);
+  assert.equal(resumedResult.isCancelled, false);
+  assert.equal(resumedResult.saved, 5);
+  assert.equal(resumedResult.percent, 100);
+  assert.equal(resumedResult.bytesSaved, 5000);
+  assert.equal(
+    savedFilesPhase2.length,
+    5 - savedFilesPhase1.length,
+    'Resumed run should only download remaining unsaved files'
+  );
+});

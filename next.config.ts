@@ -39,8 +39,41 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
-  serverExternalPackages: ['sharp', 'playwright-core', 'got-scraping'],
+  compress: true,
+  poweredByHeader: false,
+  httpAgentOptions: {
+    keepAlive: true,
+  },
+  experimental: {
+    optimizePackageImports: ['lucide-react', 'motion'],
+    staleTimes: {
+      dynamic: 60,
+      static: 300,
+    },
+  },
+  serverExternalPackages: ['sharp', 'playwright-core', 'got-scraping', '7zip-bin'],
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-DNS-Prefetch-Control', value: 'on' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+        ],
+      },
+      {
+        source: '/_next/static/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
+
 

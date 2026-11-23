@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   Download,
@@ -20,6 +20,11 @@ import {
   buildViewImageUrl,
   buildDownloadFileUrl,
 } from '../utils/downloader';
+import {
+  buildProxyImageUrl,
+  getWorkingPreviewUrl,
+  registerWorkingPreviewUrl,
+} from '../utils/clientImageCache';
 
 interface LightboxModalProps {
   image: ScrapedImage | null;
@@ -43,6 +48,25 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
   const [showComparison, setShowComparison] = useState<boolean>(false);
   const [isCopied, setIsCopied] = useState<boolean>(false);
   const [isImageLoading, setIsImageLoading] = useState<boolean>(true);
+  const [candidateIdx, setCandidateIdx] = useState<number>(0);
+
+  const candidateUrls = useMemo(() => {
+    if (!image) return [];
+    const urls: string[] = [];
+    const pushUnique = (u?: string) => {
+      if (u && !urls.includes(u)) urls.push(u);
+    };
+    const knownWorking = getWorkingPreviewUrl(image.fullUrl);
+    if (knownWorking) {
+      pushUnique(knownWorking);
+    }
+    pushUnique(image.fullUrl);
+    pushUnique(image.fallbackUrl);
+    if (image.fullUrl) {
+      pushUnique(buildProxyImageUrl(image.fullUrl, sourcePageUrl || ''));
+    }
+    return urls;
+  }, [image, sourcePageUrl]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -56,28 +80,31 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose, onNavigate]);
 
-  // Reset state on image change
+  // Reset state on image change without triggering a duplicate network probe
   useEffect(() => {
     if (image) {
       setZoomLevel(1);
       setShowComparison(false);
       setIsCopied(false);
+      setNaturalDimensions(null);
+      setCandidateIdx(0);
       setIsImageLoading(true);
-
-      const probe = new Image();
-      probe.referrerPolicy = 'no-referrer';
-      probe.onload = () => {
-        setNaturalDimensions({ width: probe.naturalWidth, height: probe.naturalHeight });
-        setIsImageLoading(false);
-      };
-      probe.onerror = () => {
-        setIsImageLoading(false);
-      };
-      probe.src = image.fullUrl;
     }
   }, [image]);
 
   if (!image) return null;
+
+  const activeFullSrc = candidateUrls[candidateIdx] || image.fullUrl;
+  const displayedSrc = showComparison ? image.thumbnailUrl : activeFullSrc;
+
+  const advanceFallback = () => {
+    if (!showComparison && candidateIdx + 1 < candidateUrls.length) {
+      setCandidateIdx((prev) => prev + 1);
+      setIsImageLoading(true);
+    } else {
+      setIsImageLoading(false);
+    }
+  };
 
   const handleCopyUrl = () => {
     navigator.clipboard.writeText(image.fullUrl);
@@ -143,9 +170,22 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
               style={{ transform: `scale(${zoomLevel})` }}
             >
               <img
-                src={showComparison ? image.thumbnailUrl : image.fullUrl}
+                src={displayedSrc}
                 alt={image.altText}
                 referrerPolicy="no-referrer"
+                onLoad={(e) => {
+                  const target = e.currentTarget;
+                  if (target.naturalWidth <= 1 || target.naturalHeight <= 1) {
+                    advanceFallback();
+                    return;
+                  }
+                  setNaturalDimensions({ width: target.naturalWidth, height: target.naturalHeight });
+                  setIsImageLoading(false);
+                  if (!showComparison && activeFullSrc) {
+                    registerWorkingPreviewUrl(image.fullUrl, activeFullSrc);
+                  }
+                }}
+                onError={advanceFallback}
                 className="max-w-full max-h-[60vh] lg:max-h-[70vh] object-contain rounded shadow-lg pointer-events-none"
               />
             </div>

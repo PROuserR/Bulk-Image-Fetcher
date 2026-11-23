@@ -98,6 +98,7 @@ export const STUDIO_NAV_ITEMS: StudioNavEntry[] = [
 interface StudioSidebarProps {
   activeTab: WorkspaceTabId;
   onSelectTab: (tab: WorkspaceTabId) => void;
+  onPrefetchTab?: (tab: WorkspaceTabId) => void;
   onOpenCommandPalette: () => void;
   extractedCount: number;
 }
@@ -107,6 +108,7 @@ const GROUPS: StudioNavEntry['group'][] = ['Capture', 'Post-Production', 'System
 export const StudioSidebar: React.FC<StudioSidebarProps> = ({
   activeTab,
   onSelectTab,
+  onPrefetchTab,
   onOpenCommandPalette,
   extractedCount,
 }) => {
@@ -179,6 +181,8 @@ export const StudioSidebar: React.FC<StudioSidebarProps> = ({
                     aria-selected={isActive}
                     aria-controls={`tabpanel-${item.id}`}
                     onClick={() => onSelectTab(item.id)}
+                    onMouseEnter={() => onPrefetchTab?.(item.id)}
+                    onFocus={() => onPrefetchTab?.(item.id)}
                     className={`w-full flex items-center justify-between gap-2.5 px-2.5 py-2 rounded-xl text-left transition-all duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
                       isActive
                         ? 'bg-white dark:bg-[#171A23] text-[#141413] dark:text-white border border-[#E4E0D6] dark:border-white/[0.1] shadow-xs'

@@ -12,12 +12,17 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
+  Pause,
+  PauseCircle,
+  Play,
 } from 'lucide-react';
 import { ProgressiveDownloadProgress, formatBytes } from '../utils/progressiveDownloader';
 
 interface ProgressiveDownloadBarProps {
   progress: ProgressiveDownloadProgress | null;
   modeLabel?: string;
+  onPause?: () => void;
+  onResume?: () => void;
   onCancel: () => void;
   onRetryFailed: () => void;
   onDismiss: () => void;
@@ -26,6 +31,8 @@ interface ProgressiveDownloadBarProps {
 export const ProgressiveDownloadBar: React.FC<ProgressiveDownloadBarProps> = ({
   progress,
   modeLabel = 'Progressive Direct Save',
+  onPause,
+  onResume,
   onCancel,
   onRetryFailed,
   onDismiss,
@@ -43,22 +50,27 @@ export const ProgressiveDownloadBar: React.FC<ProgressiveDownloadBarProps> = ({
     bytesSaved,
     currentItems,
     isRunning,
+    isPaused,
     isCancelled,
     failedItems,
   } = progress;
 
   const hasFailures = failed > 0;
-  const isCompleteSuccess = !isRunning && !isCancelled && !hasFailures && saved > 0;
+  const remaining = Math.max(0, total - saved - failed);
+  const isCompleteSuccess = !isRunning && !isPaused && !isCancelled && !hasFailures && saved > 0;
 
   return (
     <section
       aria-label="Progressive direct download status"
+      data-testid="progressive-download-bar"
       className="bg-white dark:bg-[#111318] rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 transition-colors"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
           {isRunning ? (
             <Loader2 className="w-4 h-4 text-blue-600 dark:text-blue-400 animate-spin shrink-0" />
+          ) : isPaused ? (
+            <PauseCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
           ) : isCompleteSuccess ? (
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
           ) : (
@@ -85,6 +97,14 @@ export const ProgressiveDownloadBar: React.FC<ProgressiveDownloadBarProps> = ({
                   <span className="text-zinc-300 dark:text-zinc-700">·</span>
                   <span className="text-[11px] font-medium text-blue-600 dark:text-blue-400">
                     4 parallel workers
+                  </span>
+                </>
+              )}
+              {isPaused && (
+                <>
+                  <span className="text-zinc-300 dark:text-zinc-700">·</span>
+                  <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 tabular-nums">
+                    Paused ({remaining} left · Ready to resume later)
                   </span>
                 </>
               )}
@@ -116,16 +136,40 @@ export const ProgressiveDownloadBar: React.FC<ProgressiveDownloadBarProps> = ({
 
         <div className="flex items-center gap-2 shrink-0">
           {isRunning ? (
-            <button
-              type="button"
-              onClick={onCancel}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-            >
-              <XCircle className="w-3.5 h-3.5" />
-              <span>Cancel</span>
-            </button>
+            <>
+              {onPause && (
+                <button
+                  type="button"
+                  data-testid="direct-pause-btn"
+                  onClick={onPause}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <Pause className="w-3.5 h-3.5" />
+                  <span>Pause</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onCancel}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                <span>Cancel</span>
+              </button>
+            </>
           ) : (
             <>
+              {isPaused && onResume && remaining > 0 && (
+                <button
+                  type="button"
+                  data-testid="direct-resume-btn"
+                  onClick={onResume}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer tabular-nums"
+                >
+                  <Play className="w-3.5 h-3.5" />
+                  <span>Resume ({remaining} left)</span>
+                </button>
+              )}
               {hasFailures && (
                 <>
                   <button
@@ -153,7 +197,8 @@ export const ProgressiveDownloadBar: React.FC<ProgressiveDownloadBarProps> = ({
               <button
                 type="button"
                 onClick={onDismiss}
-                aria-label="Dismiss progressive download status"
+                aria-label={isPaused ? 'Discard paused download' : 'Dismiss progressive download status'}
+                title={isPaused ? 'Discard paused download' : 'Dismiss'}
                 className="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -175,7 +220,7 @@ export const ProgressiveDownloadBar: React.FC<ProgressiveDownloadBarProps> = ({
           className={`h-full transition-all duration-200 ${
             isRunning
               ? 'bg-blue-600'
-              : hasFailures || isCancelled
+              : isPaused || hasFailures || isCancelled
                 ? 'bg-amber-500'
                 : 'bg-emerald-600'
           }`}

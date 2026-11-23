@@ -10,7 +10,10 @@ import {
   ensureUniqueFilename,
   escapeHtml,
   isValidImageBuffer,
+  fetchValidImageBuffer,
   resolveImageBufferWithFallbacks,
+  clearServerImageCache,
+  getServerImageCacheStats,
 } from './fetchHelpers.ts';
 
 test('buildRelayTarget handles empty, {url} placeholder, url= suffix, and query params', () => {
@@ -113,4 +116,89 @@ test('resolveImageBufferWithFallbacks resolves detail page and fallback URLs in 
     'https://cdn.example.com/fresh-master.png',
   ]);
 });
+
+test('fetchValidImageBuffer caches buffers across requests, deduplicates concurrent fetches, and computes consistent ETags', async () => {
+  clearServerImageCache();
+  let fetchCount = 0;
+  const fakeBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4]);
+
+  const slowFetcher = async () => {
+    fetchCount++;
+    await new Promise((r) => setTimeout(r, 25));
+    return new Response(new Uint8Array(fakeBytes), {
+      status: 200,
+      headers: { 'content-type': 'image/png' },
+    });
+  };
+
+  // Concurrent requests for the same URL must share a single upstream fetch
+  const [r1, r2] = await Promise.all([
+    fetchValidImageBuffer('https://cdn.example.com/shared.png', {
+      useCache: true,
+      fetcher: slowFetcher,
+    }),
+    fetchValidImageBuffer('https://cdn.example.com/shared.png', {
+      useCache: true,
+      fetcher: slowFetcher,
+    }),
+  ]);
+
+  assert.ok(r1 && r2);
+  assert.equal(fetchCount, 1);
+  assert.equal(r1.etag, r2.etag);
+  assert.match(r1.etag, /^"img-12-[A-Za-z0-9_-]+"$/);
+
+  // Subsequent request must hit LRU cache without invoking upstream fetcher
+  const r3 = await fetchValidImageBuffer('https://cdn.example.com/shared.png', {
+    useCache: true,
+    fetcher: slowFetcher,
+  });
+  assert.ok(r3);
+  assert.equal(fetchCount, 1);
+  assert.equal(r3.fromCache, true);
+  assert.equal(r3.etag, r1.etag);
+  assert.equal(getServerImageCacheStats().entries, 1);
+  assert.equal(getServerImageCacheStats().bytes, fakeBytes.byteLength);
+
+  clearServerImageCache();
+});
+
+test('resolveImageBufferWithFallbacks aliases fallback master under primary imageUrl', async () => {
+  clearServerImageCache();
+  let upstreamCalls = 0;
+  const fakeMaster = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5]);
+
+  const mockFetcher = async (url: string) => {
+    upstreamCalls++;
+    if (url.includes('master-resolved.jpg')) {
+      return new Response(new Uint8Array(fakeMaster), {
+        status: 200,
+        headers: { 'content-type': 'image/jpeg' },
+      });
+    }
+    return new Response('forbidden', { status: 403 });
+  };
+
+  const first = await resolveImageBufferWithFallbacks({
+    imageUrl: 'https://cdn.example.com/thumb-or-expired.jpg',
+    fallbackUrl: 'https://cdn.example.com/master-resolved.jpg',
+    useCache: true,
+    fetcher: mockFetcher,
+  });
+  assert.ok(first);
+  assert.equal(upstreamCalls, 2); // primary failed -> fallback succeeded
+
+  // Next request using primary imageUrl returns aliased buffer directly from cache
+  const second = await fetchValidImageBuffer('https://cdn.example.com/thumb-or-expired.jpg', {
+    useCache: true,
+    fetcher: mockFetcher,
+  });
+  assert.ok(second);
+  assert.equal(second.fromCache, true);
+  assert.equal(second.etag, first.etag);
+  assert.equal(upstreamCalls, 2);
+
+  clearServerImageCache();
+});
+
 

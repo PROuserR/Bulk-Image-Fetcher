@@ -1,4 +1,5 @@
 import path from 'path';
+import crypto from 'crypto';
 
 export const DEFAULT_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
@@ -142,9 +143,27 @@ export async function fetchHtmlViaNonUkRelay(
   };
 }
 
+const DETAIL_HTML_CACHE = new Map<string, { expiresAt: number; result: HtmlFetchResult }>();
+const INFLIGHT_DETAIL_HTML = new Map<string, Promise<HtmlFetchResult>>();
+const DETAIL_CACHE_TTL_MS = 120_000;
+const DETAIL_CACHE_MAX_ENTRIES = 250;
+
+function setBoundedDetailCache(key: string, result: HtmlFetchResult) {
+  if (!result.ok || !result.html || result.html.length > 1_500_000) return;
+  if (DETAIL_HTML_CACHE.size >= DETAIL_CACHE_MAX_ENTRIES) {
+    const oldestKey = DETAIL_HTML_CACHE.keys().next().value;
+    if (oldestKey) DETAIL_HTML_CACHE.delete(oldestKey);
+  }
+  DETAIL_HTML_CACHE.set(key, {
+    expiresAt: Date.now() + DETAIL_CACHE_TTL_MS,
+    result,
+  });
+}
+
 /**
  * Fetches a detail or gallery HTML page directly (or via explicit relayUrl),
  * automatically falling back to the non-UK HTML relay if UK geo-blocking is detected.
+ * Uses bounded TTL caching + in-flight request deduplication for speed & network efficiency.
  */
 export async function fetchDetailPageHtmlSmart(
   rawTargetUrl: string,
@@ -156,34 +175,69 @@ export async function fetchDetailPageHtmlSmart(
 ): Promise<HtmlFetchResult> {
   const { relayUrl = '', preferNonUkRelay = false, timeoutMs = 10000 } = options;
   const cleanRelay = relayUrl.trim();
+  const cacheKey = `${preferNonUkRelay ? '1' : '0'}|${cleanRelay}|${rawTargetUrl}`;
 
-  if (preferNonUkRelay && !cleanRelay) {
-    return fetchHtmlViaNonUkRelay(rawTargetUrl, timeoutMs);
+  const cached = DETAIL_HTML_CACHE.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
+  }
+  if (cached) {
+    DETAIL_HTML_CACHE.delete(cacheKey);
   }
 
-  const target = cleanRelay ? buildRelayTarget(rawTargetUrl, cleanRelay) : rawTargetUrl;
-  const resp = await fetch(target, {
-    headers: {
-      'User-Agent': DEFAULT_USER_AGENT,
-      Accept: HTML_ACCEPT_HEADER,
-      'Accept-Language': 'en-US,en;q=0.8',
-    },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const html = await resp.text();
-  const resolvedUrl = cleanRelay ? rawTargetUrl : resp.url || rawTargetUrl;
-
-  if (!cleanRelay && isGeoBlockedHtml(html, resolvedUrl)) {
-    return fetchHtmlViaNonUkRelay(rawTargetUrl, Math.max(timeoutMs, 12000));
+  const inflight = INFLIGHT_DETAIL_HTML.get(cacheKey);
+  if (inflight) {
+    return inflight;
   }
 
-  return {
-    ok: resp.ok,
-    status: resp.status,
-    statusText: resp.statusText,
-    url: resolvedUrl,
-    html,
-  };
+  const promise = (async (): Promise<HtmlFetchResult> => {
+    try {
+      if (preferNonUkRelay && !cleanRelay) {
+        const res = await fetchHtmlViaNonUkRelay(rawTargetUrl, timeoutMs);
+        if (res.ok && !isGeoBlockedHtml(res.html, res.url)) {
+          setBoundedDetailCache(cacheKey, res);
+        }
+        return res;
+      }
+
+      const target = cleanRelay ? buildRelayTarget(rawTargetUrl, cleanRelay) : rawTargetUrl;
+      const resp = await fetch(target, {
+        headers: {
+          'User-Agent': DEFAULT_USER_AGENT,
+          Accept: HTML_ACCEPT_HEADER,
+          'Accept-Language': 'en-US,en;q=0.8',
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      const html = await resp.text();
+      const resolvedUrl = cleanRelay ? rawTargetUrl : resp.url || rawTargetUrl;
+
+      if (!cleanRelay && isGeoBlockedHtml(html, resolvedUrl)) {
+        const relayRes = await fetchHtmlViaNonUkRelay(rawTargetUrl, Math.max(timeoutMs, 12000));
+        if (relayRes.ok && !isGeoBlockedHtml(relayRes.html, relayRes.url)) {
+          setBoundedDetailCache(cacheKey, relayRes);
+        }
+        return relayRes;
+      }
+
+      const result: HtmlFetchResult = {
+        ok: resp.ok,
+        status: resp.status,
+        statusText: resp.statusText,
+        url: resolvedUrl,
+        html,
+      };
+      if (result.ok && !isBotChallengeHtml(result.html)) {
+        setBoundedDetailCache(cacheKey, result);
+      }
+      return result;
+    } finally {
+      INFLIGHT_DETAIL_HTML.delete(cacheKey);
+    }
+  })();
+
+  INFLIGHT_DETAIL_HTML.set(cacheKey, promise);
+  return promise;
 }
 
 /**
@@ -321,6 +375,97 @@ export function isValidImageBuffer(
   return true;
 }
 
+export interface CachedImageBufferResult {
+  buf: Buffer;
+  contentType: string;
+  etag: string;
+  fromCache?: boolean;
+}
+
+const IMAGE_BUFFER_CACHE = new Map<
+  string,
+  { expiresAt: number; buf: Buffer; contentType: string; etag: string }
+>();
+const INFLIGHT_IMAGE_BUFFER = new Map<string, Promise<CachedImageBufferResult | null>>();
+const IMAGE_CACHE_TTL_MS = 10 * 60 * 1000;
+const IMAGE_CACHE_MAX_ENTRIES = 350;
+const IMAGE_CACHE_MAX_BYTES = 160 * 1024 * 1024;
+const IMAGE_CACHE_MAX_SINGLE_FILE_BYTES = 25 * 1024 * 1024;
+let imageCacheTotalBytes = 0;
+
+function computeBufferEtag(buf: Buffer): string {
+  const digest = crypto.createHash('sha1').update(buf).digest('base64url').slice(0, 12);
+  return `"img-${buf.byteLength}-${digest}"`;
+}
+
+function getImageCacheKey(targetUrl: string, relayUrl = ''): string {
+  return `${relayUrl.trim()}|${targetUrl}`;
+}
+
+function evictImageCacheKey(key: string) {
+  const existing = IMAGE_BUFFER_CACHE.get(key);
+  if (!existing) return;
+  IMAGE_BUFFER_CACHE.delete(key);
+  imageCacheTotalBytes = Math.max(0, imageCacheTotalBytes - existing.buf.byteLength);
+}
+
+function getCachedImageBufferEntry(key: string): CachedImageBufferResult | null {
+  const entry = IMAGE_BUFFER_CACHE.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    evictImageCacheKey(key);
+    return null;
+  }
+  // Refresh LRU recency
+  IMAGE_BUFFER_CACHE.delete(key);
+  IMAGE_BUFFER_CACHE.set(key, entry);
+  return {
+    buf: entry.buf,
+    contentType: entry.contentType,
+    etag: entry.etag,
+    fromCache: true,
+  };
+}
+
+function setCachedImageBufferEntry(
+  key: string,
+  buf: Buffer,
+  contentType: string,
+  etag?: string
+): string {
+  const resolvedEtag = etag || computeBufferEtag(buf);
+  if (buf.byteLength <= 0 || buf.byteLength > IMAGE_CACHE_MAX_SINGLE_FILE_BYTES) {
+    return resolvedEtag;
+  }
+  evictImageCacheKey(key);
+  while (
+    IMAGE_BUFFER_CACHE.size >= IMAGE_CACHE_MAX_ENTRIES ||
+    (imageCacheTotalBytes + buf.byteLength > IMAGE_CACHE_MAX_BYTES && IMAGE_BUFFER_CACHE.size > 0)
+  ) {
+    const oldestKey = IMAGE_BUFFER_CACHE.keys().next().value;
+    if (!oldestKey) break;
+    evictImageCacheKey(oldestKey);
+  }
+  IMAGE_BUFFER_CACHE.set(key, {
+    expiresAt: Date.now() + IMAGE_CACHE_TTL_MS,
+    buf,
+    contentType,
+    etag: resolvedEtag,
+  });
+  imageCacheTotalBytes += buf.byteLength;
+  return resolvedEtag;
+}
+
+export function clearServerImageCache(): void {
+  IMAGE_BUFFER_CACHE.clear();
+  INFLIGHT_IMAGE_BUFFER.clear();
+  imageCacheTotalBytes = 0;
+}
+
+export function getServerImageCacheStats(): { entries: number; bytes: number } {
+  return { entries: IMAGE_BUFFER_CACHE.size, bytes: imageCacheTotalBytes };
+}
+
 export async function fetchValidImageBuffer(
   targetUrl: string,
   options: {
@@ -328,29 +473,67 @@ export async function fetchValidImageBuffer(
     relayUrl?: string;
     timeoutMs?: number;
     minBytes?: number;
+    useCache?: boolean;
     fetcher?: (url: string, referer: string, timeoutMs: number) => Promise<globalThis.Response>;
   } = {}
-): Promise<{ buf: Buffer; contentType: string } | null> {
+): Promise<CachedImageBufferResult | null> {
   if (!targetUrl) return null;
   const {
     explicitReferer,
     relayUrl = '',
     timeoutMs = 8500,
     minBytes = 1,
-    fetcher = fetchImageWithRefererFallback,
+    useCache,
+    fetcher,
   } = options;
+
+  const shouldCache = useCache !== undefined ? useCache : !fetcher;
+  const cacheKey = getImageCacheKey(targetUrl, relayUrl);
+
+  if (shouldCache) {
+    const cached = getCachedImageBufferEntry(cacheKey);
+    if (cached && isValidImageBuffer(cached.buf, cached.contentType, minBytes)) {
+      return cached;
+    }
+
+    const inflight = INFLIGHT_IMAGE_BUFFER.get(cacheKey);
+    if (inflight) {
+      const shared = await inflight;
+      if (shared && isValidImageBuffer(shared.buf, shared.contentType, minBytes)) {
+        return { ...shared, fromCache: true };
+      }
+      return null;
+    }
+  }
+
+  const effectiveFetcher = fetcher || fetchImageWithRefererFallback;
   const referer = resolveImageReferer(targetUrl, explicitReferer);
   const fetchTarget = relayUrl ? buildRelayTarget(targetUrl, relayUrl) : targetUrl;
-  try {
-    const resp = await fetcher(fetchTarget, referer, timeoutMs);
-    if (!resp.ok) return null;
-    const contentType = resp.headers.get('content-type') || 'application/octet-stream';
-    const buf = Buffer.from(await resp.arrayBuffer());
-    if (!isValidImageBuffer(buf, contentType, minBytes)) return null;
-    return { buf, contentType };
-  } catch {
-    return null;
+
+  const task = (async (): Promise<CachedImageBufferResult | null> => {
+    try {
+      const resp = await effectiveFetcher(fetchTarget, referer, timeoutMs);
+      if (!resp.ok) return null;
+      const contentType = resp.headers.get('content-type') || 'application/octet-stream';
+      const buf = Buffer.from(await resp.arrayBuffer());
+      if (!isValidImageBuffer(buf, contentType, minBytes)) return null;
+      const etag = shouldCache
+        ? setCachedImageBufferEntry(cacheKey, buf, contentType)
+        : computeBufferEtag(buf);
+      return { buf, contentType, etag, fromCache: false };
+    } catch {
+      return null;
+    } finally {
+      if (shouldCache) {
+        INFLIGHT_IMAGE_BUFFER.delete(cacheKey);
+      }
+    }
+  })();
+
+  if (shouldCache) {
+    INFLIGHT_IMAGE_BUFFER.set(cacheKey, task);
   }
+  return task;
 }
 
 export interface ImageBufferFallbackParams {
@@ -361,16 +544,18 @@ export interface ImageBufferFallbackParams {
   linkedPageUrl?: string;
   minBytes?: number;
   allowFallbackUrl?: boolean;
+  useCache?: boolean;
   resolveDetailPageUrl?: (detailUrl: string) => Promise<string | null>;
   fetcher?: (url: string, referer: string, timeoutMs: number) => Promise<globalThis.Response>;
 }
 
 /**
  * Fetches an image buffer with ordered fallbacks: primary URL -> linked detail page -> fallbackUrl -> ImageFap mirror.
+ * Shares cached buffers across preview proxy, individual file downloads, and batch archive downloads.
  */
 export async function resolveImageBufferWithFallbacks(
   params: ImageBufferFallbackParams
-): Promise<{ buf: Buffer; contentType: string } | null> {
+): Promise<CachedImageBufferResult | null> {
   const {
     imageUrl,
     explicitReferer,
@@ -379,15 +564,19 @@ export async function resolveImageBufferWithFallbacks(
     linkedPageUrl = '',
     minBytes = 1,
     allowFallbackUrl = true,
+    useCache,
     resolveDetailPageUrl,
     fetcher,
   } = params;
+
+  const shouldCache = useCache !== undefined ? useCache : !fetcher;
 
   let result = await fetchValidImageBuffer(imageUrl, {
     explicitReferer,
     relayUrl,
     timeoutMs: 8500,
     minBytes,
+    useCache: shouldCache,
     fetcher,
   });
 
@@ -402,6 +591,7 @@ export async function resolveImageBufferWithFallbacks(
           relayUrl,
           timeoutMs: 8000,
           minBytes,
+          useCache: shouldCache,
           fetcher,
         });
       }
@@ -416,6 +606,7 @@ export async function resolveImageBufferWithFallbacks(
       relayUrl,
       timeoutMs: 6000,
       minBytes,
+      useCache: shouldCache,
       fetcher,
     });
   }
@@ -430,11 +621,22 @@ export async function resolveImageBufferWithFallbacks(
         relayUrl: '',
         timeoutMs: 6000,
         minBytes,
+        useCache: shouldCache,
         fetcher,
       });
     }
   }
 
+  // Alias cache under the requested primary imageUrl so repeated /api/proxy, /api/download-file,
+  // or /api/download-zip requests don't re-run detail-page or mirror lookups.
+  if (result && shouldCache && imageUrl) {
+    const primaryKey = getImageCacheKey(imageUrl, relayUrl);
+    if (!IMAGE_BUFFER_CACHE.has(primaryKey)) {
+      setCachedImageBufferEntry(primaryKey, result.buf, result.contentType, result.etag);
+    }
+  }
+
   return result;
 }
+
 

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type JSZip from 'jszip';
 import * as cheerio from 'cheerio';
+import pLimit from 'p-limit';
 import { SAMPLE_PRESETS } from '../utils/samplePages.ts';
 import type { ScrapedImage } from '../utils/scraperLogic.ts';
 import { classifyResolution } from '../utils/scraperLogic.ts';
@@ -393,7 +394,7 @@ export async function resolveLinkedFullResGallery({
   images,
   pageUrl,
   fetchDetailHtml,
-  batchSize = 5,
+  batchSize = 8,
 }: ResolveLinkedGalleryParams): Promise<{
   images: ScrapedImage[];
   subpageGeoBlocked: boolean;
@@ -524,31 +525,46 @@ export async function resolveLinkedFullResGallery({
     for (let idx = stride; idx < candidates.length; idx += stride) {
       strided.push(candidates[idx]);
     }
-    for (let i = 0; i < strided.length && !subpageGeoBlocked; i += stridedStepConcurrency) {
-      const pending = strided
-        .slice(i, i + stridedStepConcurrency)
-        .filter((img) => !img.deepScraped && !crawledUrls.has(img.linkedPageUrl || ''));
-      if (pending.length > 0) {
-        await Promise.all(pending.map((img) => crawlDetailImage(img, 10000)));
-      }
-    }
+    const strideLimit = pLimit(stridedStepConcurrency);
+    await Promise.all(
+      strided.map((img) =>
+        strideLimit(async () => {
+          if (subpageGeoBlocked || img.deepScraped || crawledUrls.has(img.linkedPageUrl || '')) {
+            return;
+          }
+          await crawlDetailImage(img, 10000);
+        })
+      )
+    );
   }
 
   // 3. Complete sweep of EVERY remaining unresolved candidate (no 120-image truncation)
   // When filmstrip maps are active, crawl sequentially so each 12-15 item strip resolves its neighbors before the next fetch
   if (!subpageGeoBlocked) {
     const effectiveSweepConcurrency = discoveredFilmstrip || isIfapTarget ? 1 : batchSize;
-    for (let i = 0; i < candidates.length && !subpageGeoBlocked; ) {
-      const batch: ScrapedImage[] = [];
-      while (i < candidates.length && batch.length < effectiveSweepConcurrency) {
-        const candidate = candidates[i++];
+    if (effectiveSweepConcurrency <= 1) {
+      for (const candidate of candidates) {
+        if (subpageGeoBlocked) break;
         if (needsDetailResolution(candidate) && !crawledUrls.has(candidate.linkedPageUrl || '')) {
-          batch.push(candidate);
+          await crawlDetailImage(candidate, 10000);
         }
       }
-      if (batch.length > 0) {
-        await Promise.all(batch.map((img) => crawlDetailImage(img, 10000)));
-      }
+    } else {
+      const sweepLimit = pLimit(effectiveSweepConcurrency);
+      await Promise.all(
+        candidates.map((candidate) =>
+          sweepLimit(async () => {
+            if (
+              subpageGeoBlocked ||
+              !needsDetailResolution(candidate) ||
+              crawledUrls.has(candidate.linkedPageUrl || '')
+            ) {
+              return;
+            }
+            await crawlDetailImage(candidate, 10000);
+          })
+        )
+      );
     }
   }
 
@@ -564,7 +580,7 @@ export async function resolveDiscoveredGalleriesIntermediateLinks(
   fetchHtml: (url: string, timeoutMs: number) => Promise<DetailPageFetchResult | null>,
   options: { maxToResolve?: number; concurrency?: number } = {}
 ): Promise<DiscoveredGallery[]> {
-  const { maxToResolve = 20, concurrency = 5 } = options;
+  const { maxToResolve = 20, concurrency = 8 } = options;
   const resolved: DiscoveredGallery[] = galleries.map((g) => ({ ...g }));
 
   const targets = resolved
@@ -572,10 +588,10 @@ export async function resolveDiscoveredGalleriesIntermediateLinks(
     .filter(({ g }) => Boolean(g.isIntermediateItem || isIntermediateItemPageUrl(g.url)))
     .slice(0, maxToResolve);
 
-  for (let i = 0; i < targets.length; i += concurrency) {
-    const chunk = targets.slice(i, i + concurrency);
-    await Promise.all(
-      chunk.map(async ({ g, index }) => {
+  const limit = pLimit(Math.max(1, concurrency));
+  await Promise.all(
+    targets.map(({ g, index }) =>
+      limit(async () => {
         try {
           const resp = await fetchHtml(g.url, 9000);
           if (!resp || !resp.ok || !resp.html || isGeoBlockedHtml(resp.html, resp.url)) return;
@@ -592,8 +608,8 @@ export async function resolveDiscoveredGalleriesIntermediateLinks(
           // Keep intermediate item URL so scrapeSingleGallery can retry later if needed
         }
       })
-    );
-  }
+    )
+  );
 
   // Deduplicate if multiple intermediate item cards resolved to the same album URL
   const deduped: DiscoveredGallery[] = [];

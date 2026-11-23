@@ -6,7 +6,9 @@ import {
   Eye,
   Globe,
   ImageOff,
+  Loader2,
   Maximize,
+  ScanFace,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
@@ -18,7 +20,8 @@ export type BooleanFilterKey =
   | 'onlyUnshrunk'
   | 'onlyWithSubpage'
   | 'onlyHighRes'
-  | 'excludeIconsAndSmall';
+  | 'excludeIconsAndSmall'
+  | 'onlyHumanFaces';
 
 export interface FilterFacetSummary {
   masters: number;
@@ -28,12 +31,23 @@ export interface FilterFacetSummary {
   withSubpage: number;
   highRes: number;
   nonIcons: number;
+  humanFaces?: number;
+  noFaceExcluded?: number;
+  faceScanned?: number;
+}
+
+export interface FaceScanStatusSummary {
+  isScanning: boolean;
+  scanned: number;
+  total: number;
+  error?: string | null;
 }
 
 interface FilterChipsRowProps {
   filters: GalleryFilterState;
   facets: FilterFacetSummary;
   onToggle: (key: BooleanFilterKey) => void;
+  faceScanStatus?: FaceScanStatusSummary;
   compact?: boolean;
 }
 
@@ -44,6 +58,7 @@ export const FilterChipsRow: React.FC<FilterChipsRowProps> = ({
   filters,
   facets,
   onToggle,
+  faceScanStatus,
   compact = false,
 }) => {
   const pad = compact ? 'px-2.5 py-1 text-[11px] rounded-md' : 'px-3 py-1.5 text-xs rounded-lg';
@@ -51,10 +66,17 @@ export const FilterChipsRow: React.FC<FilterChipsRowProps> = ({
 
   const inactiveCls =
     'bg-zinc-50 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-white';
+  const aiInactiveCls =
+    'bg-blue-50/80 dark:bg-blue-950/35 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-800/80 hover:bg-blue-100/90 dark:hover:bg-blue-900/50';
   const primaryActiveCls =
     'bg-blue-600 text-white border border-blue-600 shadow-xs';
   const secondaryActiveCls =
     'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 border border-zinc-900 dark:border-zinc-100';
+
+  const isScanningFaces = Boolean(faceScanStatus?.isScanning);
+  const faceScannedCount = facets.faceScanned ?? 0;
+  const humanFacesCount = facets.humanFaces ?? 0;
+  const noFaceExcludedCount = facets.noFaceExcluded ?? 0;
 
   return (
     <>
@@ -72,6 +94,39 @@ export const FilterChipsRow: React.FC<FilterChipsRowProps> = ({
           {compact ? `Full Masters (${facets.masters})` : `Full Masters Only (${facets.masters})`}
         </span>
         {filters.onlyMasters && <Check className={iconCls} />}
+      </button>
+
+      <button
+        type="button"
+        data-testid="ai-human-face-filter-btn"
+        aria-pressed={filters.onlyHumanFaces}
+        onClick={() => onToggle('onlyHumanFaces')}
+        className={`flex items-center gap-1.5 ${pad} font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+          filters.onlyHumanFaces ? primaryActiveCls : aiInactiveCls
+        }`}
+        title="Use AI vision to include only images with a human face/person and exclude non-person or nature backgrounds"
+      >
+        {isScanningFaces ? (
+          <Loader2 className={`${iconCls} animate-spin`} />
+        ) : (
+          <ScanFace className={iconCls} />
+        )}
+        <span className="tabular-nums">
+          {isScanningFaces
+            ? `Scanning People (${faceScanStatus?.scanned ?? 0}/${faceScanStatus?.total ?? 0})...`
+            : filters.onlyHumanFaces
+              ? compact
+                ? `Only Person (${humanFacesCount})`
+                : `Include Only Person (${humanFacesCount}${noFaceExcludedCount > 0 ? ` · ${noFaceExcludedCount} excluded` : ''})`
+              : faceScannedCount > 0
+                ? compact
+                  ? `Only Person (${humanFacesCount})`
+                  : `Include Only Person (${humanFacesCount})`
+                : compact
+                  ? 'Only Person (AI)'
+                  : 'Include Only Person (AI)'}
+        </span>
+        {filters.onlyHumanFaces && !isScanningFaces && <Check className={iconCls} />}
       </button>
 
       <button

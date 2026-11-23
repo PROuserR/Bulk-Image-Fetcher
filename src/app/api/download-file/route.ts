@@ -43,12 +43,27 @@ export async function GET(req: NextRequest) {
       return new Response('Failed to fetch remote image', { status: 502 });
     }
 
+    const ifNoneMatch = req.headers.get('if-none-match');
+    if (ifNoneMatch && ifNoneMatch === result.etag) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          ETag: result.etag,
+          'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+          'X-Image-Cache': result.fromCache ? 'HIT' : 'MISS',
+        },
+      });
+    }
+
     return new Response(new Uint8Array(result.buf), {
       status: 200,
       headers: {
         'Content-Type': result.contentType,
         'Content-Disposition': `attachment; filename="${cleanFilename}"`,
-        'Cache-Control': 'public, max-age=86400',
+        ETag: result.etag,
+        'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+        'X-Image-Cache': result.fromCache ? 'HIT' : 'MISS',
+        'X-Content-Type-Options': 'nosniff',
         'Access-Control-Allow-Origin': '*',
         'Content-Length': result.buf.byteLength.toString(),
       },
@@ -57,3 +72,4 @@ export async function GET(req: NextRequest) {
     return new Response(`Download error: ${err?.message || 'Unknown error'}`, { status: 502 });
   }
 }
+

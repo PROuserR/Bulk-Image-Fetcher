@@ -6,11 +6,10 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import JSZip from 'jszip';
-import { motion, MotionConfig } from 'motion/react';
+import dynamic from 'next/dynamic';
+import { MotionConfig } from 'motion/react';
 import { Header, WorkspaceTabId } from './components/Header';
 import { StudioSidebar } from './components/StudioSidebar';
-import { CommandPalette } from './components/CommandPalette';
 import { BentoShowcase } from './components/BentoShowcase';
 import {
   ScraperControls,
@@ -22,37 +21,160 @@ import {
   NestedCrawlProgressState,
 } from './components/NestedGalleryQueue';
 import { GalleryView } from './components/GalleryView';
-import { LightboxModal } from './components/LightboxModal';
-import { DeploymentDocs } from './components/DeploymentDocs';
-import { CropResizeStudio } from './components/CropResizeStudio';
-import { FilterStudio } from './components/FilterStudio';
-import { GifMakerStudio } from './components/GifMakerStudio';
-import { HumanClassifierStudio } from './components/HumanClassifierStudio';
-import { GemmaStudio } from './components/GemmaStudio';
-import { ScrapedImage } from './utils/scraperLogic';
+import {
+  ScrapedImage,
+  FaceScanResult,
+  isBlankOrPlaceholderUrl,
+} from './utils/scraperLogic';
+
+const StudioTabSkeleton = () => (
+  <div
+    aria-label="Loading studio"
+    className="bg-white dark:bg-[#111319] border border-[#E4E0D6] dark:border-white/[0.08] rounded-2xl p-6 space-y-4 animate-pulse"
+  >
+    <div className="h-6 w-52 bg-[#EFECE4] dark:bg-zinc-800 rounded-md" />
+    <div className="h-4 w-80 max-w-full bg-[#F6F5F1] dark:bg-zinc-800/70 rounded" />
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+      <div className="h-40 bg-[#EFECE4]/70 dark:bg-zinc-800/40 rounded-xl" />
+      <div className="h-40 bg-[#EFECE4]/70 dark:bg-zinc-800/40 rounded-xl md:col-span-2" />
+    </div>
+  </div>
+);
+
+const loadCropResizeStudio = () =>
+  import('./components/CropResizeStudio').then((m) => m.CropResizeStudio);
+const loadFilterStudio = () =>
+  import('./components/FilterStudio').then((m) => m.FilterStudio);
+const loadGifMakerStudio = () =>
+  import('./components/GifMakerStudio').then((m) => m.GifMakerStudio);
+const loadHumanClassifierStudio = () =>
+  import('./components/HumanClassifierStudio').then((m) => m.HumanClassifierStudio);
+const loadGemmaStudio = () =>
+  import('./components/GemmaStudio').then((m) => m.GemmaStudio);
+const loadDeploymentDocs = () =>
+  import('./components/DeploymentDocs').then((m) => m.DeploymentDocs);
+const loadLightboxModal = () =>
+  import('./components/LightboxModal').then((m) => m.LightboxModal);
+const loadCommandPalette = () =>
+  import('./components/CommandPalette').then((m) => m.CommandPalette);
+
+const CropResizeStudio = dynamic(loadCropResizeStudio, {
+  ssr: false,
+  loading: StudioTabSkeleton,
+});
+const FilterStudio = dynamic(loadFilterStudio, {
+  ssr: false,
+  loading: StudioTabSkeleton,
+});
+const GifMakerStudio = dynamic(loadGifMakerStudio, {
+  ssr: false,
+  loading: StudioTabSkeleton,
+});
+const HumanClassifierStudio = dynamic(loadHumanClassifierStudio, {
+  ssr: false,
+  loading: StudioTabSkeleton,
+});
+const GemmaStudio = dynamic(loadGemmaStudio, {
+  ssr: false,
+  loading: StudioTabSkeleton,
+});
+const DeploymentDocs = dynamic(loadDeploymentDocs, {
+  ssr: false,
+  loading: StudioTabSkeleton,
+});
+const LightboxModal = dynamic(loadLightboxModal, {
+  ssr: false,
+  loading: () => null,
+});
+const CommandPalette = dynamic(loadCommandPalette, {
+  ssr: false,
+  loading: () => null,
+});
+
+const prefetchedChunks = new Set<WorkspaceTabId>();
+
+function prefetchTabChunk(tab: WorkspaceTabId) {
+  if (prefetchedChunks.has(tab)) return;
+  prefetchedChunks.add(tab);
+  switch (tab) {
+    case 'crop':
+      void loadCropResizeStudio();
+      break;
+    case 'filters':
+      void loadFilterStudio();
+      break;
+    case 'gif':
+      void loadGifMakerStudio();
+      break;
+    case 'classifier':
+      void loadHumanClassifierStudio();
+      break;
+    case 'gemma':
+      void loadGemmaStudio();
+      break;
+    case 'docs':
+      void loadDeploymentDocs();
+      break;
+  }
+}
 import {
   DiscoveredGallery,
   NestedGallerySummary,
   NestedGalleryRunInput,
   mergeNestedGalleryResults,
-  sanitizeGalleryFolderName,
 } from './utils/nestedGalleryLogic';
 import { SAMPLE_PRESETS } from './utils/samplePages';
-import { triggerBlobDownload } from './utils/downloader';
+import {
+  ArchiveFormat,
+  DEFAULT_ARCHIVE_FORMAT,
+  triggerBlobDownload,
+} from './utils/downloader';
+import {
+  downloadCompressedArchiveWithProgress,
+  formatArchiveStatusLine,
+  cleanupStagedArchiveToken,
+  ArchiveDownloadProgress,
+  ResumableArchiveState,
+} from './utils/archiveDownloader';
 import {
   runProgressiveDownloads,
   ProgressiveDownloadProgress,
   DownloadItemInput,
 } from './utils/progressiveDownloader';
 import { ProgressiveDownloadBar } from './components/ProgressiveDownloadBar';
+import { ArchiveDownloadBar } from './components/ArchiveDownloadBar';
 import { fetchApiJson } from './utils/safeFetchJson';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
+
+const PAUSED_DIRECT_STORAGE_KEY = 'fullres_paused_direct_v1';
+const PAUSED_ARCHIVE_STORAGE_KEY = 'fullres_paused_archive_v1';
+
+function compactImageForStorage(img: ScrapedImage): ScrapedImage {
+  return {
+    id: img.id,
+    thumbnailUrl: img.thumbnailUrl,
+    fullUrl: img.fullUrl,
+    fallbackUrl: img.fallbackUrl,
+    linkedPageUrl: img.linkedPageUrl,
+    altText: img.altText,
+    filename: img.filename,
+    format: img.format,
+    isUnshrunk: img.isUnshrunk,
+    unshrinkMethod: img.unshrinkMethod || 'Direct URL',
+    resolutionTier: img.resolutionTier,
+    galleryId: img.galleryId,
+    galleryTitle: img.galleryTitle,
+    galleryUrl: img.galleryUrl,
+  };
+}
 
 export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [themeHydrated, setThemeHydrated] = useState<boolean>(false);
 
   const [activeTab, setActiveTab] = useState<WorkspaceTabId>('scraper');
+  const [visitedTabs, setVisitedTabs] = useState<Set<WorkspaceTabId>>(() => new Set(['scraper']));
+  const [hasOpenedCommandPalette, setHasOpenedCommandPalette] = useState<boolean>(false);
   const [cropSeedImages, setCropSeedImages] = useState<ScrapedImage[]>([]);
   const [filterSeedImages, setFilterSeedImages] = useState<ScrapedImage[]>([]);
   const [gifSeedImages, setGifSeedImages] = useState<ScrapedImage[]>([]);
@@ -68,6 +190,8 @@ export default function App() {
   const [selectedImage, setSelectedImage] = useState<ScrapedImage | null>(null);
   const [isDownloadingZip, setIsDownloadingZip] = useState<boolean>(false);
   const [downloadProgress, setDownloadProgress] = useState<string | null>(null);
+  const [archiveProgress, setArchiveProgress] = useState<ArchiveDownloadProgress | null>(null);
+  const [archiveFormat, setArchiveFormat] = useState<ArchiveFormat>(DEFAULT_ARCHIVE_FORMAT);
   const [isExportingZip, setIsExportingZip] = useState<boolean>(false);
   const [relayUrl, setRelayUrl] = useState<string>('');
   const [isGeoBlocked, setIsGeoBlocked] = useState<boolean>(false);
@@ -103,15 +227,44 @@ export default function App() {
   const [isLoadingMorePosts, setIsLoadingMorePosts] = useState<boolean>(false);
   const [progressiveState, setProgressiveState] = useState<ProgressiveDownloadProgress | null>(null);
   const [progressiveModeLabel, setProgressiveModeLabel] = useState<string>('Progressive Direct Save');
+  const [faceScanMap, setFaceScanMap] = useState<Record<string, FaceScanResult>>({});
+  const [faceScanStatus, setFaceScanStatus] = useState<{
+    isScanning: boolean;
+    scanned: number;
+    total: number;
+    error: string | null;
+  }>({ isScanning: false, scanned: 0, total: 0, error: null });
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const directSaveAbortRef = useRef<AbortController | null>(null);
+  const archiveAbortRef = useRef<AbortController | null>(null);
+  const faceScanAbortRef = useRef<AbortController | null>(null);
+  const faceScanMapRef = useRef<Record<string, FaceScanResult>>({});
   const lastDirectSaveImagesRef = useRef<ScrapedImage[]>([]);
+  const pausedDirectContextRef = useRef<{
+    images: ScrapedImage[];
+    sourceUrl: string;
+    relayUrl: string;
+    directoryHandle?: any;
+    modeLabel: string;
+  } | null>(null);
+  const pausedArchiveResumeRef = useRef<ResumableArchiveState | null>(null);
+  const pausedArchiveContextRef = useRef<{
+    images: ScrapedImage[];
+    pageTitle: string;
+    sourceUrl: string;
+    relayUrl: string;
+    format: ArchiveFormat;
+  } | null>(null);
   const nestedAbortRef = useRef<AbortController | null>(null);
   const discoverNestedRef = useRef<
     ((url: string, options: NestedDiscoverOptions) => Promise<void>) | null
   >(null);
+
+  useEffect(() => {
+    faceScanMapRef.current = faceScanMap;
+  }, [faceScanMap]);
 
   const showToast = useCallback((message: string) => {
     if (toastTimerRef.current) {
@@ -123,6 +276,92 @@ export default function App() {
       toastTimerRef.current = null;
     }, 4000);
   }, []);
+
+  const clearPersistedDirectPause = useCallback(() => {
+    try {
+      localStorage.removeItem(PAUSED_DIRECT_STORAGE_KEY);
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  const persistDirectPause = useCallback(
+    (
+      progress: ProgressiveDownloadProgress,
+      targetImages: ScrapedImage[],
+      srcUrl: string,
+      rUrl: string,
+      modeLabel: string
+    ) => {
+      try {
+        localStorage.setItem(
+          PAUSED_DIRECT_STORAGE_KEY,
+          JSON.stringify({
+            progress,
+            images: targetImages.slice(0, 600).map(compactImageForStorage),
+            sourceUrl: srcUrl,
+            relayUrl: rUrl,
+            modeLabel,
+          })
+        );
+      } catch {
+        // ignore quota errors
+      }
+    },
+    []
+  );
+
+  const clearPersistedArchivePause = useCallback(() => {
+    try {
+      localStorage.removeItem(PAUSED_ARCHIVE_STORAGE_KEY);
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  const persistArchivePause = useCallback(
+    (
+      snapshot: ResumableArchiveState,
+      ctx: {
+        images: ScrapedImage[];
+        pageTitle: string;
+        sourceUrl: string;
+        relayUrl: string;
+        format: ArchiveFormat;
+      }
+    ) => {
+      try {
+        localStorage.setItem(
+          PAUSED_ARCHIVE_STORAGE_KEY,
+          JSON.stringify({
+            snapshot: {
+              token: snapshot.token,
+              filename: snapshot.filename,
+              format: snapshot.format,
+              contentType: snapshot.contentType,
+              totalBytes: snapshot.totalBytes,
+              bytesLoaded: snapshot.bytesLoaded,
+              fileCount: snapshot.fileCount,
+              percent: snapshot.percent,
+              fetchedImages: snapshot.fetchedImages,
+              validImages: snapshot.validImages,
+              totalImages: snapshot.totalImages,
+            },
+            context: {
+              images: ctx.images.slice(0, 600).map(compactImageForStorage),
+              pageTitle: ctx.pageTitle,
+              sourceUrl: ctx.sourceUrl,
+              relayUrl: ctx.relayUrl,
+              format: ctx.format,
+            },
+          })
+        );
+      } catch {
+        // ignore quota errors
+      }
+    },
+    []
+  );
 
   const handleClearCropSeed = useCallback(() => {
     setCropSeedImages([]);
@@ -148,25 +387,41 @@ export default function App() {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       nestedAbortRef.current?.abort();
+      archiveAbortRef.current?.abort();
+      directSaveAbortRef.current?.abort();
+      faceScanAbortRef.current?.abort();
     };
   }, []);
 
-  const handleSelectTab = useCallback((nextTab: WorkspaceTabId) => {
-    setActiveTab(nextTab);
-    try {
-      const nextUrl = new URL(window.location.href);
-      if (nextTab === 'scraper') {
-        nextUrl.searchParams.delete('tab');
-      } else {
-        nextUrl.searchParams.set('tab', nextTab);
-      }
-      if (nextUrl.toString() !== window.location.href) {
-        window.history.pushState({ tab: nextTab }, '', nextUrl.toString());
-      }
-    } catch {
-      // ignore history errors inside sandboxed iframes
-    }
+  const markTabVisited = useCallback((tab: WorkspaceTabId) => {
+    setVisitedTabs((prev) => {
+      if (prev.has(tab)) return prev;
+      const next = new Set(prev);
+      next.add(tab);
+      return next;
+    });
   }, []);
+
+  const handleSelectTab = useCallback(
+    (nextTab: WorkspaceTabId) => {
+      markTabVisited(nextTab);
+      setActiveTab(nextTab);
+      try {
+        const nextUrl = new URL(window.location.href);
+        if (nextTab === 'scraper') {
+          nextUrl.searchParams.delete('tab');
+        } else {
+          nextUrl.searchParams.set('tab', nextTab);
+        }
+        if (nextUrl.toString() !== window.location.href) {
+          window.history.pushState({ tab: nextTab }, '', nextUrl.toString());
+        }
+      } catch {
+        // ignore history errors inside sandboxed iframes
+      }
+    },
+    [markTabVisited]
+  );
 
   // Resolve persisted/system theme and initial URL ?tab= on client mount
   useEffect(() => {
@@ -182,6 +437,7 @@ export default function App() {
         urlTab === 'gemma' ||
         urlTab === 'docs'
       ) {
+        markTabVisited(urlTab);
         setActiveTab(urlTab);
       }
     } catch {
@@ -200,6 +456,7 @@ export default function App() {
           urlTab === 'gemma' ||
           urlTab === 'docs'
         ) {
+          markTabVisited(urlTab);
           setActiveTab(urlTab);
         } else {
           setActiveTab('scraper');
@@ -220,6 +477,91 @@ export default function App() {
     } catch {
       // ignore storage restrictions
     }
+
+    // Restore any paused downloads saved from earlier session
+    try {
+      const savedDirectRaw = localStorage.getItem(PAUSED_DIRECT_STORAGE_KEY);
+      if (savedDirectRaw) {
+        const parsed = JSON.parse(savedDirectRaw);
+        if (
+          parsed?.progress?.isPaused &&
+          Array.isArray(parsed?.images) &&
+          parsed.images.length > 0 &&
+          parsed.progress.saved < parsed.progress.total
+        ) {
+          lastDirectSaveImagesRef.current = parsed.images;
+          pausedDirectContextRef.current = {
+            images: parsed.images,
+            sourceUrl: parsed.sourceUrl || '',
+            relayUrl: parsed.relayUrl || '',
+            modeLabel: parsed.modeLabel || 'Progressive Direct Save',
+          };
+          setProgressiveModeLabel(parsed.modeLabel || 'Progressive Direct Save');
+          setProgressiveState({
+            ...parsed.progress,
+            isRunning: false,
+            isPaused: true,
+            isCancelled: false,
+            currentItems: [],
+            activeCount: 0,
+          });
+        } else {
+          localStorage.removeItem(PAUSED_DIRECT_STORAGE_KEY);
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+
+    try {
+      const savedArchiveRaw = localStorage.getItem(PAUSED_ARCHIVE_STORAGE_KEY);
+      if (savedArchiveRaw) {
+        const parsed = JSON.parse(savedArchiveRaw);
+        if (
+          parsed?.snapshot &&
+          parsed?.context?.images &&
+          Array.isArray(parsed.context.images) &&
+          parsed.context.images.length > 0
+        ) {
+          const snap = parsed.snapshot;
+          const ctx = parsed.context;
+          pausedArchiveResumeRef.current = {
+            token: snap.token,
+            filename: snap.filename,
+            format: snap.format || '7z',
+            contentType: snap.contentType || 'application/x-7z-compressed',
+            totalBytes: snap.totalBytes,
+            bytesLoaded: 0,
+            fileCount: snap.fileCount || ctx.images.length,
+            receivedChunks: [],
+            percent: snap.percent || 0,
+            fetchedImages: snap.fetchedImages || 0,
+            validImages: snap.validImages || 0,
+            totalImages: snap.totalImages || ctx.images.length,
+          };
+          pausedArchiveContextRef.current = ctx;
+          setArchiveProgress({
+            format: snap.format || '7z',
+            filename: snap.filename,
+            stage: 'paused',
+            percent: snap.percent || 0,
+            fetchedImages: snap.fetchedImages || 0,
+            validImages: snap.validImages || 0,
+            totalImages: snap.totalImages || ctx.images.length,
+            bytesLoaded: 0,
+            bytesTotal: snap.totalBytes,
+            isRunning: false,
+            isPaused: true,
+            message: `Paused .${String(snap.format || '7z').toUpperCase()} download (${snap.percent || 0}%) · Ready to resume`,
+          });
+        } else {
+          localStorage.removeItem(PAUSED_ARCHIVE_STORAGE_KEY);
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+
     setThemeHydrated(true);
 
     return () => {
@@ -242,6 +584,13 @@ export default function App() {
     }
   }, [theme, themeHydrated]);
 
+  // Warm Lightbox chunk once gallery cards appear
+  useEffect(() => {
+    if (images.length > 0) {
+      void loadLightboxModal();
+    }
+  }, [images.length]);
+
   // Global Cmd/Ctrl+K command palette + 1-7 studio switcher shortcuts
   useEffect(() => {
     const tabByKey: Record<string, WorkspaceTabId> = {
@@ -256,6 +605,7 @@ export default function App() {
     const onGlobalKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
+        setHasOpenedCommandPalette(true);
         setIsCommandPaletteOpen((prev) => !prev);
         return;
       }
@@ -321,6 +671,9 @@ export default function App() {
       igOptions?: { sessionCookie?: string; maxPosts?: number }
     ) => {
       nestedAbortRef.current?.abort();
+      faceScanAbortRef.current?.abort();
+      setFaceScanMap({});
+      setFaceScanStatus({ isScanning: false, scanned: 0, total: 0, error: null });
       setNestedDiscovery(null);
       setSelectedNestedIds(new Set());
       setNestedSummaries([]);
@@ -401,6 +754,9 @@ export default function App() {
       if (galleriesToCrawl.length === 0) return;
 
       nestedAbortRef.current?.abort();
+      faceScanAbortRef.current?.abort();
+      setFaceScanMap({});
+      setFaceScanStatus({ isScanning: false, scanned: 0, total: 0, error: null });
       const abortController = new AbortController();
       nestedAbortRef.current = abortController;
 
@@ -532,7 +888,7 @@ export default function App() {
         }
       };
 
-      const concurrency = Math.min(2, galleriesToCrawl.length);
+      const concurrency = Math.min(4, galleriesToCrawl.length);
       await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
       if (nestedAbortRef.current === abortController) {
@@ -718,6 +1074,9 @@ export default function App() {
     maxPosts?: number
   ) => {
     nestedAbortRef.current?.abort();
+    faceScanAbortRef.current?.abort();
+    setFaceScanMap({});
+    setFaceScanStatus({ isScanning: false, scanned: 0, total: 0, error: null });
     setNestedDiscovery(null);
     setSelectedNestedIds(new Set());
     setNestedSummaries([]);
@@ -880,139 +1239,287 @@ export default function App() {
     }
   };
 
-  const handleBatchDownloadZip = async (selectedImages: ScrapedImage[]) => {
-    if (selectedImages.length === 0) return;
-    setIsDownloadingZip(true);
-    setDownloadProgress('Connecting to server zip service...');
-    setErrorMessage(null);
+  const handleScanHumanFaces = useCallback(
+    async (targetImages: ScrapedImage[]): Promise<boolean> => {
+      const currentMap = faceScanMapRef.current;
+      const toScan = targetImages.filter(
+        (img) =>
+          !isBlankOrPlaceholderUrl(img.thumbnailUrl || img.fullUrl) &&
+          (!currentMap[img.id] || Boolean(currentMap[img.id]?.error))
+      );
 
-    let serverSuccess = false;
-    try {
-      setDownloadProgress('Connecting to server ZIP packager...');
-      const response = await fetch('/api/download-zip', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          images: selectedImages.map((img) => ({
-            url: img.fullUrl,
-            fallbackUrl: img.fallbackUrl,
-            linkedPageUrl: img.linkedPageUrl,
-            filename: img.filename,
-            galleryTitle: img.galleryTitle,
-            galleryId: img.galleryId,
-          })),
-          referer: sourceUrl,
-          relayUrl: relayUrl.trim() || undefined,
-          onlyFullRes: true,
-        }),
-        signal: AbortSignal.timeout(40000),
+      if (toScan.length === 0) {
+        return true;
+      }
+
+      faceScanAbortRef.current?.abort();
+      const abortController = new AbortController();
+      faceScanAbortRef.current = abortController;
+
+      setErrorMessage(null);
+      setFaceScanStatus({
+        isScanning: true,
+        scanned: 0,
+        total: toScan.length,
+        error: null,
       });
 
-      if (response.ok) {
-        setDownloadProgress('Transferring ZIP package...');
-        const blob = await response.blob();
-        if (blob.size > 0) {
-          triggerBlobDownload(blob, `scraped_images_${Date.now()}.zip`);
-          showToast(`ZIP package downloaded with ${selectedImages.length} full-size images!`);
-          serverSuccess = true;
-          setIsDownloadingZip(false);
-          setDownloadProgress(null);
-          return;
+      const BATCH_SIZE = 8;
+      let scannedSoFar = 0;
+
+      try {
+        for (let i = 0; i < toScan.length; i += BATCH_SIZE) {
+          if (abortController.signal.aborted) return false;
+          const chunk = toScan.slice(i, i + BATCH_SIZE);
+
+          const { ok, data, error } = await fetchApiJson('/api/ai/human-face-filter', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              images: chunk.map((img) => ({
+                id: img.id,
+                url: img.fullUrl,
+                thumbnailUrl: img.thumbnailUrl,
+                fallbackUrl: img.fallbackUrl,
+                linkedPageUrl: img.linkedPageUrl,
+                filename: img.filename,
+              })),
+              referer: sourceUrl || undefined,
+              relayUrl: relayUrl.trim() || undefined,
+            }),
+            signal: abortController.signal,
+          });
+
+          if (abortController.signal.aborted) return false;
+
+          if (!ok || !data || !Array.isArray(data.results)) {
+            throw new Error(data?.error || error || 'AI face detection failed.');
+          }
+
+          setFaceScanMap((prev) => {
+            const next = { ...prev };
+            for (const row of data.results as FaceScanResult[] & Array<{ id: string }>) {
+              if (row && typeof row.id === 'string') {
+                next[row.id] = {
+                  hasHumanFace: Boolean(row.hasHumanFace),
+                  faceCount: Number(row.faceCount || 0),
+                  confidence: Number(row.confidence || 0),
+                  subjectSummary: String(row.subjectSummary || ''),
+                  error: row.error,
+                };
+              }
+            }
+            faceScanMapRef.current = next;
+            return next;
+          });
+
+          scannedSoFar += chunk.length;
+          setFaceScanStatus({
+            isScanning: true,
+            scanned: Math.min(scannedSoFar, toScan.length),
+            total: toScan.length,
+            error: null,
+          });
         }
+
+        if (faceScanAbortRef.current === abortController) {
+          faceScanAbortRef.current = null;
+        }
+        setFaceScanStatus({
+          isScanning: false,
+          scanned: toScan.length,
+          total: toScan.length,
+          error: null,
+        });
+
+        const merged = faceScanMapRef.current;
+        const matchedFaces = targetImages.filter((img) => merged[img.id]?.hasHumanFace).length;
+        const excludedCount = targetImages.filter((img) => merged[img.id] && !merged[img.id].hasHumanFace).length;
+        showToast(
+          `AI face filter complete: kept ${matchedFaces} with human faces, excluded ${excludedCount} without faces.`
+        );
+        return true;
+      } catch (err: any) {
+        if (abortController.signal.aborted || err?.name === 'AbortError') {
+          return false;
+        }
+        const msg = err?.message || 'AI human-face scan failed.';
+        setFaceScanStatus({
+          isScanning: false,
+          scanned: scannedSoFar,
+          total: toScan.length,
+          error: msg,
+        });
+        setErrorMessage(msg);
+        return false;
       }
-    } catch (serverErr) {
-      console.warn('Server-side ZIP packaging dropped or timed out, switching to browser-side assembler:', serverErr);
+    },
+    [relayUrl, showToast, sourceUrl]
+  );
+
+  const handleBatchDownloadZip = async (
+    selectedImages: ScrapedImage[],
+    requestedFormat?: ArchiveFormat,
+    resumeOptions?: {
+      resumeState?: ResumableArchiveState | null;
+      overrideContext?: {
+        pageTitle: string;
+        sourceUrl: string;
+        relayUrl: string;
+        format: ArchiveFormat;
+      };
+    }
+  ) => {
+    if (selectedImages.length === 0 || isDownloadingZip) return;
+    const ctxPageTitle = resumeOptions?.overrideContext?.pageTitle ?? pageTitle;
+    const ctxSourceUrl = resumeOptions?.overrideContext?.sourceUrl ?? sourceUrl;
+    const ctxRelayUrl = resumeOptions?.overrideContext?.relayUrl ?? relayUrl;
+    const format: ArchiveFormat =
+      resumeOptions?.overrideContext?.format || requestedFormat || archiveFormat || '7z';
+    const formatUpper = format.toUpperCase();
+
+    if (!resumeOptions?.resumeState && pausedArchiveResumeRef.current?.token) {
+      cleanupStagedArchiveToken(pausedArchiveResumeRef.current.token);
+      pausedArchiveResumeRef.current = null;
+      clearPersistedArchivePause();
     }
 
-    if (serverSuccess) return;
+    archiveAbortRef.current?.abort('CANCELLED');
+    const abortController = new AbortController();
+    archiveAbortRef.current = abortController;
 
-    try {
-      setDownloadProgress(`Assembling ZIP in browser (0 of ${selectedImages.length})...`);
-      const clientZip = new JSZip();
-      const seenByFolder = new Map<string, Set<string>>();
-      let addedCount = 0;
+    const activeContext = {
+      images: selectedImages,
+      pageTitle: ctxPageTitle,
+      sourceUrl: ctxSourceUrl,
+      relayUrl: ctxRelayUrl,
+      format,
+    };
+    pausedArchiveContextRef.current = activeContext;
 
-      const BATCH_SIZE = 3;
-      for (let i = 0; i < selectedImages.length; i += BATCH_SIZE) {
-        const batch = selectedImages.slice(i, i + BATCH_SIZE);
-        await Promise.all(
-          batch.map(async (img, idx) => {
-            const overallIdx = i + idx;
-            setDownloadProgress(`Fetching master image ${overallIdx + 1} of ${selectedImages.length}...`);
+    setIsDownloadingZip(true);
+    setDownloadProgress(
+      resumeOptions?.resumeState
+        ? `${resumeOptions.resumeState.percent}% · Resuming .${formatUpper}...`
+        : `0% · Connecting to server .${formatUpper}...`
+    );
+    setErrorMessage(null);
 
-            const folderKey = img.galleryTitle
-              ? sanitizeGalleryFolderName(img.galleryTitle, img.galleryId || 'gallery')
-              : '';
-            let seenNames = seenByFolder.get(folderKey);
-            if (!seenNames) {
-              seenNames = new Set<string>();
-              seenByFolder.set(folderKey, seenNames);
-            }
+    const result = await downloadCompressedArchiveWithProgress({
+      images: selectedImages,
+      pageTitle: ctxPageTitle,
+      sourceUrl: ctxSourceUrl,
+      relayUrl: ctxRelayUrl,
+      format,
+      onlyFullRes: true,
+      signal: abortController.signal,
+      resumeState: resumeOptions?.resumeState || null,
+      onPauseSnapshot: (snapshot) => {
+        pausedArchiveResumeRef.current = snapshot;
+        persistArchivePause(snapshot, activeContext);
+      },
+      onProgress: (snapshot) => {
+        setArchiveProgress(snapshot);
+        setDownloadProgress(snapshot.isRunning ? formatArchiveStatusLine(snapshot) : null);
+      },
+    });
 
-            let filename = img.filename || `image_${overallIdx + 1}.jpg`;
-            const lastDot = filename.lastIndexOf('.');
-            const ext = lastDot !== -1 ? filename.slice(lastDot) : '.jpg';
-            const base = lastDot !== -1 ? filename.slice(0, lastDot) : filename;
-            let uniqueName = filename;
-            let counter = 1;
-            while (seenNames.has(uniqueName)) {
-              uniqueName = `${base}_${counter}${ext}`;
-              counter++;
-            }
-            seenNames.add(uniqueName);
-            const zipEntryPath = folderKey ? `${folderKey}/${uniqueName}` : uniqueName;
+    if (archiveAbortRef.current === abortController) {
+      archiveAbortRef.current = null;
+    }
 
-            let imageBlob: Blob | null = null;
-            try {
-              const relayParam = relayUrl.trim() ? `&relayUrl=${encodeURIComponent(relayUrl.trim())}` : '';
-              const downloadUrl = `/api/download-file?url=${encodeURIComponent(img.fullUrl)}&filename=${encodeURIComponent(uniqueName)}&referer=${encodeURIComponent(sourceUrl)}${relayParam}`;
-              const resp = await fetch(downloadUrl, { signal: AbortSignal.timeout(12000) });
-              if (resp.ok) {
-                imageBlob = await resp.blob();
-              }
-            } catch {}
+    setIsDownloadingZip(false);
+    setDownloadProgress(null);
 
-            if (!imageBlob) {
-              try {
-                const directResp = await fetch(img.fullUrl, { mode: 'cors', signal: AbortSignal.timeout(8000) });
-                if (directResp.ok) {
-                  imageBlob = await directResp.blob();
-                }
-              } catch {}
-            }
-
-            if (imageBlob && imageBlob.size > 0) {
-              clientZip.file(zipEntryPath, imageBlob);
-              addedCount++;
-            }
-          })
-        );
-      }
-
-      if (addedCount === 0) {
-        throw new Error('Remote image host blocked packaging. Use "Direct Save" to download images directly to your device.');
-      }
-
-      setDownloadProgress('Generating ZIP archive...');
-      const zipBlob = await clientZip.generateAsync({ type: 'blob' });
-      triggerBlobDownload(zipBlob, `scraped_images_${Date.now()}.zip`);
-      showToast(`ZIP package downloaded with ${addedCount} full-size images!`);
-    } catch (err: any) {
-      setErrorMessage(`Batch download failed: ${err.message}`);
-    } finally {
-      setIsDownloadingZip(false);
-      setDownloadProgress(null);
+    if (result.paused) {
+      showToast(
+        `${formatUpper} download paused at ${pausedArchiveResumeRef.current?.percent ?? 0}%. Click Resume anytime.`
+      );
+    } else if (result.cancelled) {
+      pausedArchiveResumeRef.current = null;
+      pausedArchiveContextRef.current = null;
+      clearPersistedArchivePause();
+      showToast(`${formatUpper} archive download cancelled.`);
+    } else if (result.success) {
+      pausedArchiveResumeRef.current = null;
+      pausedArchiveContextRef.current = null;
+      clearPersistedArchivePause();
+      const label = result.usedFallback
+        ? `Browser ZIP fallback "${result.filename}" downloaded with ${result.fileCount} full-size images!`
+        : `${result.format.toUpperCase()} package "${result.filename}" downloaded with ${result.fileCount} full-size images!`;
+      showToast(label);
+    } else if (result.error) {
+      pausedArchiveResumeRef.current = null;
+      clearPersistedArchivePause();
+      setErrorMessage(`Batch download failed: ${result.error}`);
     }
   };
 
+  const handlePauseArchiveDownload = useCallback(() => {
+    archiveAbortRef.current?.abort('PAUSED');
+  }, []);
+
+  const handleResumeArchiveDownload = useCallback(() => {
+    const resumeState = pausedArchiveResumeRef.current;
+    const ctx = pausedArchiveContextRef.current;
+    if (!ctx || ctx.images.length === 0) return;
+    void handleBatchDownloadZip(ctx.images, ctx.format, {
+      resumeState,
+      overrideContext: {
+        pageTitle: ctx.pageTitle,
+        sourceUrl: ctx.sourceUrl,
+        relayUrl: ctx.relayUrl,
+        format: ctx.format,
+      },
+    });
+  }, []);
+
+  const handleCancelArchiveDownload = useCallback(() => {
+    if (archiveAbortRef.current) {
+      archiveAbortRef.current.abort('CANCELLED');
+    } else if (archiveProgress?.stage === 'paused') {
+      cleanupStagedArchiveToken(pausedArchiveResumeRef.current?.token);
+      pausedArchiveResumeRef.current = null;
+      pausedArchiveContextRef.current = null;
+      clearPersistedArchivePause();
+      setArchiveProgress(null);
+    }
+  }, [archiveProgress?.stage, clearPersistedArchivePause]);
+
+  const handleDismissArchiveDownload = useCallback(() => {
+    if (!archiveProgress?.isRunning) {
+      if (pausedArchiveResumeRef.current?.token) {
+        cleanupStagedArchiveToken(pausedArchiveResumeRef.current.token);
+      }
+      pausedArchiveResumeRef.current = null;
+      pausedArchiveContextRef.current = null;
+      clearPersistedArchivePause();
+      setArchiveProgress(null);
+    }
+  }, [archiveProgress?.isRunning, clearPersistedArchivePause]);
+
   const handleDownloadIndividually = async (
     targetImages: ScrapedImage[],
-    options?: { saveToFolder?: boolean }
+    options?: {
+      saveToFolder?: boolean;
+      resumeFrom?: ProgressiveDownloadProgress;
+      overrideContext?: {
+        sourceUrl?: string;
+        relayUrl?: string;
+        directoryHandle?: any;
+        modeLabel?: string;
+      };
+    }
   ) => {
     if (targetImages.length === 0 || progressiveState?.isRunning) return;
 
-    let directoryHandle: any = null;
-    if (options?.saveToFolder && typeof (window as any).showDirectoryPicker === 'function') {
+    let directoryHandle: any = options?.overrideContext?.directoryHandle ?? null;
+    if (
+      !directoryHandle &&
+      !options?.resumeFrom &&
+      options?.saveToFolder &&
+      typeof (window as any).showDirectoryPicker === 'function'
+    ) {
       try {
         directoryHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
       } catch (err: any) {
@@ -1021,11 +1528,28 @@ export default function App() {
       }
     }
 
+    const effectiveSourceUrl = options?.overrideContext?.sourceUrl ?? sourceUrl;
+    const effectiveRelayUrl = options?.overrideContext?.relayUrl ?? relayUrl;
+    const effectiveModeLabel =
+      options?.overrideContext?.modeLabel ??
+      (directoryHandle ? 'Saving to Folder' : 'Progressive Direct Save');
+
+    if (!options?.resumeFrom) {
+      clearPersistedDirectPause();
+    }
+
     const abortController = new AbortController();
     directSaveAbortRef.current = abortController;
     lastDirectSaveImagesRef.current = targetImages;
+    pausedDirectContextRef.current = {
+      images: targetImages,
+      sourceUrl: effectiveSourceUrl,
+      relayUrl: effectiveRelayUrl,
+      directoryHandle,
+      modeLabel: effectiveModeLabel,
+    };
     setErrorMessage(null);
-    setProgressiveModeLabel(directoryHandle ? 'Saving to Folder' : 'Progressive Direct Save');
+    setProgressiveModeLabel(effectiveModeLabel);
 
     const downloadItems: DownloadItemInput[] = targetImages.map((img, idx) => ({
       id: img.id || `img-${idx}`,
@@ -1033,8 +1557,8 @@ export default function App() {
       filename: img.filename || `image_${idx + 1}.jpg`,
       fallbackUrl: img.fallbackUrl,
       linkedPageUrl: img.linkedPageUrl,
-      referer: sourceUrl,
-      relayUrl: relayUrl.trim() || undefined,
+      referer: effectiveSourceUrl,
+      relayUrl: effectiveRelayUrl.trim() || undefined,
     }));
 
     const saveBlobFn = directoryHandle
@@ -1047,10 +1571,17 @@ export default function App() {
       : undefined;
 
     const finalResult = await runProgressiveDownloads(downloadItems, {
-      concurrency: 4,
-      staggerMs: directoryHandle ? 0 : 120,
+      concurrency: 6,
+      staggerMs: directoryHandle ? 0 : 60,
       timeoutMs: 12000,
       signal: abortController.signal,
+      initialProgress: options?.resumeFrom
+        ? {
+            savedItemIds: options.resumeFrom.savedItemIds,
+            bytesSaved: options.resumeFrom.bytesSaved,
+            itemStatuses: options.resumeFrom.itemStatuses,
+          }
+        : undefined,
       saveBlobFn,
       onProgress: (snapshot) => {
         setProgressiveState(snapshot);
@@ -1061,27 +1592,72 @@ export default function App() {
       directSaveAbortRef.current = null;
     }
 
-    if (finalResult.isCancelled) {
+    if (finalResult.isPaused) {
+      persistDirectPause(
+        finalResult,
+        targetImages,
+        effectiveSourceUrl,
+        effectiveRelayUrl,
+        effectiveModeLabel
+      );
+      showToast(
+        `Direct save paused (${finalResult.saved} of ${finalResult.total} saved). Click Resume anytime.`
+      );
+    } else if (finalResult.isCancelled) {
+      pausedDirectContextRef.current = null;
+      clearPersistedDirectPause();
       showToast(`Direct save cancelled (${finalResult.saved} of ${finalResult.total} saved).`);
     } else if (finalResult.saved > 0 && finalResult.failed === 0) {
+      pausedDirectContextRef.current = null;
+      clearPersistedDirectPause();
       showToast(
         directoryHandle
           ? `Saved all ${finalResult.saved} full-size images directly to folder!`
           : `Progressive direct save completed for ${finalResult.saved} image(s)!`
       );
     } else if (finalResult.saved > 0) {
+      clearPersistedDirectPause();
       showToast(
         `Saved ${finalResult.saved} of ${finalResult.total} images (${finalResult.failed} failed — use Retry Failed to re-attempt).`
       );
     } else {
+      clearPersistedDirectPause();
       setErrorMessage(
         'Direct download could not fetch image files. Try opening failed links or enabling a relay URL.'
       );
     }
   };
 
+  const handlePauseDirectSave = () => {
+    directSaveAbortRef.current?.abort('PAUSED');
+  };
+
+  const handleResumeDirectSave = () => {
+    if (!progressiveState?.isPaused) return;
+    const ctx = pausedDirectContextRef.current;
+    const targetImages = ctx?.images?.length ? ctx.images : lastDirectSaveImagesRef.current;
+    if (targetImages.length === 0) return;
+    void handleDownloadIndividually(targetImages, {
+      resumeFrom: progressiveState,
+      overrideContext: ctx
+        ? {
+            sourceUrl: ctx.sourceUrl,
+            relayUrl: ctx.relayUrl,
+            directoryHandle: ctx.directoryHandle,
+            modeLabel: ctx.directoryHandle ? ctx.modeLabel : 'Progressive Direct Save',
+          }
+        : undefined,
+    });
+  };
+
   const handleCancelDirectSave = () => {
-    directSaveAbortRef.current?.abort();
+    if (directSaveAbortRef.current) {
+      directSaveAbortRef.current.abort('CANCELLED');
+    } else {
+      pausedDirectContextRef.current = null;
+      clearPersistedDirectPause();
+      setProgressiveState(null);
+    }
   };
 
   const handleRetryFailedDirectSave = () => {
@@ -1091,12 +1667,14 @@ export default function App() {
       failedIds.has(img.id || `img-${idx}`)
     );
     if (retryTargets.length > 0) {
-      handleDownloadIndividually(retryTargets);
+      void handleDownloadIndividually(retryTargets);
     }
   };
 
   const handleDismissDirectSave = () => {
     if (!progressiveState?.isRunning) {
+      pausedDirectContextRef.current = null;
+      clearPersistedDirectPause();
       setProgressiveState(null);
     }
   };
@@ -1138,7 +1716,11 @@ export default function App() {
         <StudioSidebar
           activeTab={activeTab}
           onSelectTab={handleSelectTab}
-          onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+          onPrefetchTab={prefetchTabChunk}
+          onOpenCommandPalette={() => {
+            setHasOpenedCommandPalette(true);
+            setIsCommandPaletteOpen(true);
+          }}
           extractedCount={images.length}
         />
 
@@ -1149,7 +1731,11 @@ export default function App() {
             onToggleTheme={toggleTheme}
             activeTab={activeTab}
             onSelectTab={handleSelectTab}
-            onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+            onPrefetchTab={prefetchTabChunk}
+            onOpenCommandPalette={() => {
+              setHasOpenedCommandPalette(true);
+              setIsCommandPaletteOpen(true);
+            }}
             onExportProjectZip={handleExportProjectZip}
             isExportingZip={isExportingZip}
           />
@@ -1190,14 +1776,8 @@ export default function App() {
               </div>
             )}
 
-            {/* Tab 1: Scraper & Contact-Sheet Studio */}
-            <motion.div
-              key={`panel-${activeTab}`}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-              className="space-y-6"
-            >
+            {/* Studio Tab Panels — preserve visited state in memory while lazy-loading secondary studio chunks */}
+            <div className="space-y-6">
               <div
                 id="tabpanel-scraper"
                 role="tabpanel"
@@ -1240,10 +1820,22 @@ export default function App() {
                   />
                 )}
 
+                {archiveProgress && (
+                  <ArchiveDownloadBar
+                    progress={archiveProgress}
+                    onPause={handlePauseArchiveDownload}
+                    onResume={handleResumeArchiveDownload}
+                    onCancel={handleCancelArchiveDownload}
+                    onDismiss={handleDismissArchiveDownload}
+                  />
+                )}
+
                 {progressiveState && (
                   <ProgressiveDownloadBar
                     progress={progressiveState}
                     modeLabel={progressiveModeLabel}
+                    onPause={handlePauseDirectSave}
+                    onResume={handleResumeDirectSave}
                     onCancel={handleCancelDirectSave}
                     onRetryFailed={handleRetryFailedDirectSave}
                     onDismiss={handleDismissDirectSave}
@@ -1310,6 +1902,16 @@ export default function App() {
                     isDownloadingZip={isDownloadingZip}
                     isDirectSaving={Boolean(progressiveState?.isRunning)}
                     downloadProgress={downloadProgress}
+                    archiveProgress={archiveProgress}
+                    onPauseArchiveDownload={handlePauseArchiveDownload}
+                    onResumeArchiveDownload={handleResumeArchiveDownload}
+                    onCancelArchiveDownload={handleCancelArchiveDownload}
+                    onDismissArchiveDownload={handleDismissArchiveDownload}
+                    archiveFormat={archiveFormat}
+                    onArchiveFormatChange={setArchiveFormat}
+                    faceScanMap={faceScanMap}
+                    faceScanStatus={faceScanStatus}
+                    onScanHumanFaces={handleScanHumanFaces}
                     hasMorePosts={Boolean(instagramContinuation?.hasMore)}
                     isLoadingMorePosts={isLoadingMorePosts}
                     onLoadMorePosts={handleLoadMoreInstagramPosts}
@@ -1345,12 +1947,14 @@ export default function App() {
                 hidden={activeTab !== 'crop'}
                 className={activeTab === 'crop' ? 'block' : 'hidden'}
               >
-                <CropResizeStudio
-                  seededScrapedImages={cropSeedImages}
-                  seededSourceUrl={sourceUrl}
-                  onClearSeeded={handleClearCropSeed}
-                  onNotify={showToast}
-                />
+                {visitedTabs.has('crop') && (
+                  <CropResizeStudio
+                    seededScrapedImages={cropSeedImages}
+                    seededSourceUrl={sourceUrl}
+                    onClearSeeded={handleClearCropSeed}
+                    onNotify={showToast}
+                  />
+                )}
               </div>
 
               {/* Tab 3: Image Filter & Snapchat Lens Studio */}
@@ -1360,12 +1964,14 @@ export default function App() {
                 hidden={activeTab !== 'filters'}
                 className={activeTab === 'filters' ? 'block' : 'hidden'}
               >
-                <FilterStudio
-                  seededScrapedImages={filterSeedImages}
-                  seededSourceUrl={sourceUrl}
-                  onClearSeeded={handleClearFilterSeed}
-                  onNotify={showToast}
-                />
+                {visitedTabs.has('filters') && (
+                  <FilterStudio
+                    seededScrapedImages={filterSeedImages}
+                    seededSourceUrl={sourceUrl}
+                    onClearSeeded={handleClearFilterSeed}
+                    onNotify={showToast}
+                  />
+                )}
               </div>
 
               {/* Tab 4: Animated GIF Maker Studio */}
@@ -1375,12 +1981,14 @@ export default function App() {
                 hidden={activeTab !== 'gif'}
                 className={activeTab === 'gif' ? 'block' : 'hidden'}
               >
-                <GifMakerStudio
-                  seededScrapedImages={gifSeedImages}
-                  seededSourceUrl={sourceUrl}
-                  onClearSeeded={handleClearGifSeed}
-                  onNotify={showToast}
-                />
+                {visitedTabs.has('gif') && (
+                  <GifMakerStudio
+                    seededScrapedImages={gifSeedImages}
+                    seededSourceUrl={sourceUrl}
+                    onClearSeeded={handleClearGifSeed}
+                    onNotify={showToast}
+                  />
+                )}
               </div>
 
               {/* Tab 5: AI Human Identity Classifier */}
@@ -1390,12 +1998,14 @@ export default function App() {
                 hidden={activeTab !== 'classifier'}
                 className={activeTab === 'classifier' ? 'block' : 'hidden'}
               >
-                <HumanClassifierStudio
-                  seededScrapedImages={classifierSeedImages}
-                  seededSourceUrl={sourceUrl}
-                  onClearSeeded={handleClearClassifierSeed}
-                  onNotify={showToast}
-                />
+                {visitedTabs.has('classifier') && (
+                  <HumanClassifierStudio
+                    seededScrapedImages={classifierSeedImages}
+                    seededSourceUrl={sourceUrl}
+                    onClearSeeded={handleClearClassifierSeed}
+                    onNotify={showToast}
+                  />
+                )}
               </div>
 
               {/* Tab 6: Gemma 4 Multimodal Chat & Auto-Captioner */}
@@ -1405,12 +2015,14 @@ export default function App() {
                 hidden={activeTab !== 'gemma'}
                 className={activeTab === 'gemma' ? 'block' : 'hidden'}
               >
-                <GemmaStudio
-                  seededScrapedImages={gemmaSeedImages}
-                  seededSourceUrl={sourceUrl}
-                  onClearSeeded={handleClearGemmaSeed}
-                  onNotify={showToast}
-                />
+                {visitedTabs.has('gemma') && (
+                  <GemmaStudio
+                    seededScrapedImages={gemmaSeedImages}
+                    seededSourceUrl={sourceUrl}
+                    onClearSeeded={handleClearGemmaSeed}
+                    onNotify={showToast}
+                  />
+                )}
               </div>
 
               {/* Tab 7: Setup & Deployment Instructions */}
@@ -1420,35 +2032,39 @@ export default function App() {
                 hidden={activeTab !== 'docs'}
                 className={activeTab === 'docs' ? 'block' : 'hidden'}
               >
-                <DeploymentDocs />
+                {visitedTabs.has('docs') && <DeploymentDocs />}
               </div>
-            </motion.div>
+            </div>
           </main>
 
-          <LightboxModal
-            image={selectedImage}
-            images={images}
-            sourcePageUrl={sourceUrl}
-            onClose={() => setSelectedImage(null)}
-            onNavigate={handleNavigateLightbox}
-            onDeepResolve={handleDeepResolve}
-          />
+          {selectedImage && (
+            <LightboxModal
+              image={selectedImage}
+              images={images}
+              sourcePageUrl={sourceUrl}
+              onClose={() => setSelectedImage(null)}
+              onNavigate={handleNavigateLightbox}
+              onDeepResolve={handleDeepResolve}
+            />
+          )}
 
-          <CommandPalette
-            isOpen={isCommandPaletteOpen}
-            onClose={() => setIsCommandPaletteOpen(false)}
-            theme={theme}
-            onToggleTheme={toggleTheme}
-            onSelectTab={handleSelectTab}
-            onRunNatureSample={() => {
-              if (firstSamplePreset) {
-                handleScrape(firstSamplePreset.url, firstSamplePreset.html, true, relayUrl);
-              }
-            }}
-            onOpenNestedMode={() => setRequestedMode('nested')}
-            onOpenInstagramMode={() => setRequestedMode('instagram')}
-            onExportProjectZip={handleExportProjectZip}
-          />
+          {(hasOpenedCommandPalette || isCommandPaletteOpen) && (
+            <CommandPalette
+              isOpen={isCommandPaletteOpen}
+              onClose={() => setIsCommandPaletteOpen(false)}
+              theme={theme}
+              onToggleTheme={toggleTheme}
+              onSelectTab={handleSelectTab}
+              onRunNatureSample={() => {
+                if (firstSamplePreset) {
+                  handleScrape(firstSamplePreset.url, firstSamplePreset.html, true, relayUrl);
+                }
+              }}
+              onOpenNestedMode={() => setRequestedMode('nested')}
+              onOpenInstagramMode={() => setRequestedMode('instagram')}
+              onExportProjectZip={handleExportProjectZip}
+            />
+          )}
 
           <footer className="mt-auto border-t border-[#E4E0D6] dark:border-white/[0.08] py-4 px-4 sm:px-6 lg:px-8 bg-[#FBFBF9] dark:bg-[#0D0F14] transition-colors">
             <div className="max-w-[1440px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">

@@ -22,6 +22,7 @@ interface HeaderProps {
   onToggleTheme: () => void;
   activeTab: WorkspaceTabId;
   onSelectTab: (tab: WorkspaceTabId) => void;
+  onPrefetchTab?: (tab: WorkspaceTabId) => void;
   onOpenCommandPalette: () => void;
   onExportProjectZip: () => void;
   isExportingZip: boolean;
@@ -52,6 +53,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleTheme,
   activeTab,
   onSelectTab,
+  onPrefetchTab,
   onOpenCommandPalette,
   onExportProjectZip,
   isExportingZip,
@@ -150,6 +152,8 @@ export const Header: React.FC<HeaderProps> = ({
               aria-selected={isActive}
               aria-controls={`tabpanel-${tab.id}`}
               onClick={() => onSelectTab(tab.id)}
+              onMouseEnter={() => onPrefetchTab?.(tab.id)}
+              onFocus={() => onPrefetchTab?.(tab.id)}
               className={`relative h-full flex items-center whitespace-nowrap shrink-0 cursor-pointer ${
                 isActive
                   ? 'text-[#141413] dark:text-white font-semibold'

@@ -290,3 +290,63 @@ test('unshrinkImageUrl and extractDimensionsFromUrl handle dimension-segmented a
   assert.equal(isMasterImage({ fullUrl: unshrunk.fullUrl }), true);
 });
 
+test('filterScrapedImages and getFilterFacetCounts exclude images without human faces', async () => {
+  const { getFilterFacetCounts } = await import('./scraperLogic');
+  const mixedImages = [
+    {
+      id: 'portrait',
+      thumbnailUrl: 'https://cdn.example.com/p.jpg',
+      fullUrl: 'https://cdn.example.com/p.jpg',
+      altText: 'Portrait',
+      filename: 'portrait.jpg',
+      format: 'jpg' as const,
+      isUnshrunk: true,
+      unshrinkMethod: 'Direct Full Resolution',
+      resolutionTier: 'hd' as const,
+      width: 1920,
+      height: 1080,
+    },
+    {
+      id: 'forest',
+      thumbnailUrl: 'https://cdn.example.com/forest.jpg',
+      fullUrl: 'https://cdn.example.com/forest.jpg',
+      altText: 'Nature forest',
+      filename: 'forest.jpg',
+      format: 'jpg' as const,
+      isUnshrunk: true,
+      unshrinkMethod: 'Direct Full Resolution',
+      resolutionTier: 'hd' as const,
+      width: 1920,
+      height: 1080,
+    },
+  ];
+
+  const faceScanMap = {
+    portrait: {
+      hasHumanFace: true,
+      faceCount: 1,
+      confidence: 0.95,
+      subjectSummary: 'Person portrait',
+    },
+    forest: {
+      hasHumanFace: false,
+      faceCount: 0,
+      confidence: 0.98,
+      subjectSummary: 'Pine forest landscape',
+    },
+  };
+
+  const facets = getFilterFacetCounts(mixedImages, {}, faceScanMap);
+  assert.equal(facets.faceScanned, 2);
+  assert.equal(facets.humanFaces, 1);
+  assert.equal(facets.noFaceExcluded, 1);
+
+  const faceFilters = { ...DEFAULT_GALLERY_FILTERS, onlyHumanFaces: true };
+  assert.equal(countActiveFilters(faceFilters), 1);
+  const filtered = filterScrapedImages(mixedImages, faceFilters, {}, faceScanMap);
+  assert.deepEqual(
+    filtered.map((img) => img.id),
+    ['portrait']
+  );
+});
+

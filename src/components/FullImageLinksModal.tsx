@@ -16,13 +16,16 @@ import {
   Link2,
   FileArchive,
   RotateCcw,
+  AlertCircle,
 } from 'lucide-react';
 import {
   ScrapedImage,
   GalleryFilterState,
   DEFAULT_GALLERY_FILTERS,
   PreviewStateInfo,
+  FaceScanResult,
   OrientationFilter,
+  isBlankOrPlaceholderUrl,
   filterScrapedImages,
   countActiveFilters,
   getFilterFacetCounts,
@@ -30,11 +33,18 @@ import {
 } from '../utils/scraperLogic';
 import {
   downloadFileToDisk,
-  triggerBlobDownload,
   triggerTextDownload,
   buildViewImageUrl,
+  ArchiveFormat,
+  DEFAULT_ARCHIVE_FORMAT,
 } from '../utils/downloader';
-import { FilterChipsRow, BooleanFilterKey } from './FilterStackBar';
+import {
+  downloadCompressedArchiveWithProgress,
+  formatArchiveStatusLine,
+  ArchiveDownloadProgress,
+} from '../utils/archiveDownloader';
+import { ArchiveDownloadBar } from './ArchiveDownloadBar';
+import { FilterChipsRow, BooleanFilterKey, FaceScanStatusSummary } from './FilterStackBar';
 
 interface FullImageLinksModalProps {
   isOpen: boolean;
@@ -42,7 +52,7 @@ interface FullImageLinksModalProps {
   images: ScrapedImage[];
   pageTitle: string;
   sourceUrl: string;
-  onBatchDownloadZip?: (selectedImages: ScrapedImage[]) => void;
+  onBatchDownloadZip?: (selectedImages: ScrapedImage[], format?: ArchiveFormat) => void;
   onDirectSaveAll?: (
     selectedImages: ScrapedImage[],
     options?: { saveToFolder?: boolean }
@@ -50,8 +60,18 @@ interface FullImageLinksModalProps {
   isDownloadingZip?: boolean;
   isDirectSaving?: boolean;
   downloadProgress?: string | null;
+  archiveProgress?: ArchiveDownloadProgress | null;
+  onPauseArchiveDownload?: () => void;
+  onResumeArchiveDownload?: () => void;
+  onCancelArchiveDownload?: () => void;
+  onDismissArchiveDownload?: () => void;
+  archiveFormat?: ArchiveFormat;
+  onArchiveFormatChange?: (format: ArchiveFormat) => void;
   initialFilters?: GalleryFilterState;
   previewMap?: Record<string, PreviewStateInfo>;
+  faceScanMap?: Record<string, FaceScanResult>;
+  faceScanStatus?: FaceScanStatusSummary;
+  onScanHumanFaces?: (targetImages: ScrapedImage[]) => Promise<boolean>;
 }
 
 type ViewMode = 'direct_links' | 'webpage_links' | 'table' | 'json' | 'csv';
@@ -67,8 +87,18 @@ export const FullImageLinksModal: React.FC<FullImageLinksModalProps> = ({
   isDownloadingZip = false,
   isDirectSaving = false,
   downloadProgress = null,
+  archiveProgress = null,
+  onPauseArchiveDownload,
+  onResumeArchiveDownload,
+  onCancelArchiveDownload,
+  onDismissArchiveDownload,
+  archiveFormat,
+  onArchiveFormatChange,
   initialFilters,
   previewMap,
+  faceScanMap,
+  faceScanStatus,
+  onScanHumanFaces,
 }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('direct_links');
   const [filters, setFilters] = useState<GalleryFilterState>(
@@ -77,6 +107,11 @@ export const FullImageLinksModal: React.FC<FullImageLinksModalProps> = ({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isZippingLocal, setIsZippingLocal] = useState<boolean>(false);
   const [localZipProgress, setLocalZipProgress] = useState<string | null>(null);
+  const [localArchiveProgress, setLocalArchiveProgress] = useState<ArchiveDownloadProgress | null>(null);
+  const localArchiveAbortRef = React.useRef<AbortController | null>(null);
+  const [localArchiveFormat, setLocalArchiveFormat] = useState<ArchiveFormat>(DEFAULT_ARCHIVE_FORMAT);
+  const activeArchiveFormat = archiveFormat ?? localArchiveFormat;
+  const setActiveArchiveFormat = onArchiveFormatChange ?? setLocalArchiveFormat;
 
   useEffect(() => {
     if (isOpen && initialFilters) {
@@ -93,16 +128,39 @@ export const FullImageLinksModal: React.FC<FullImageLinksModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  const facets = useMemo(() => getFilterFacetCounts(images, previewMap), [images, previewMap]);
+  const facets = useMemo(
+    () => getFilterFacetCounts(images, previewMap, faceScanMap),
+    [images, previewMap, faceScanMap]
+  );
 
   const filteredImages = useMemo(
-    () => filterScrapedImages(images, filters, previewMap),
-    [images, filters, previewMap]
+    () => filterScrapedImages(images, filters, previewMap, faceScanMap),
+    [images, filters, previewMap, faceScanMap]
   );
 
   const activeFilterCount = useMemo(() => countActiveFilters(filters), [filters]);
 
   const toggleFilterBool = (key: BooleanFilterKey) => {
+    if (key === 'onlyHumanFaces') {
+      if (filters.onlyHumanFaces) {
+        setFilters((prev) => ({ ...prev, onlyHumanFaces: false }));
+        return;
+      }
+      const unscanned = images.filter(
+        (img) =>
+          !isBlankOrPlaceholderUrl(img.thumbnailUrl || img.fullUrl) && !faceScanMap?.[img.id]
+      );
+      if (unscanned.length > 0 && onScanHumanFaces) {
+        void onScanHumanFaces(images).then((ok) => {
+          if (ok) {
+            setFilters((prev) => ({ ...prev, onlyHumanFaces: true }));
+          }
+        });
+        return;
+      }
+      setFilters((prev) => ({ ...prev, onlyHumanFaces: true }));
+      return;
+    }
     setFilters((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
@@ -176,49 +234,53 @@ export const FullImageLinksModal: React.FC<FullImageLinksModalProps> = ({
   };
 
   const isBusyZipping = isDownloadingZip || isZippingLocal;
-  const currentZipProgress = downloadProgress || localZipProgress;
+  const activeArchiveProgress = archiveProgress ?? localArchiveProgress;
+  const currentZipProgress =
+    (activeArchiveProgress?.isRunning ? formatArchiveStatusLine(activeArchiveProgress) : null) ||
+    downloadProgress ||
+    localZipProgress;
 
   const handleServerDownloadZip = async () => {
     if (filteredImages.length === 0 || isBusyZipping) return;
 
     if (onBatchDownloadZip) {
-      onBatchDownloadZip(filteredImages);
+      onBatchDownloadZip(filteredImages, activeArchiveFormat);
       return;
     }
 
-    try {
-      setIsZippingLocal(true);
-      setLocalZipProgress('Connecting to server ZIP packager...');
+    const formatUpper = activeArchiveFormat.toUpperCase();
+    localArchiveAbortRef.current?.abort();
+    const controller = new AbortController();
+    localArchiveAbortRef.current = controller;
 
-      const response = await fetch('/api/download-zip', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          images: filteredImages.map((img) => ({
-            url: img.fullUrl,
-            fallbackUrl: img.fallbackUrl,
-            linkedPageUrl: img.linkedPageUrl,
-            filename: img.filename,
-          })),
-          referer: sourceUrl,
-          onlyFullRes: true,
-        }),
-      });
+    setIsZippingLocal(true);
+    setLocalZipProgress(`0% · Connecting to server .${formatUpper}...`);
 
-      if (!response.ok) {
-        throw new Error(`Server returned HTTP ${response.status}`);
-      }
+    const result = await downloadCompressedArchiveWithProgress({
+      images: filteredImages,
+      pageTitle,
+      sourceUrl,
+      format: activeArchiveFormat,
+      onlyFullRes: true,
+      signal: controller.signal,
+      onProgress: (snapshot) => {
+        setLocalArchiveProgress(snapshot);
+        setLocalZipProgress(snapshot.isRunning ? formatArchiveStatusLine(snapshot) : null);
+      },
+    });
 
-      setLocalZipProgress('Transferring ZIP package...');
-      const blob = await response.blob();
-      const safeTitle = (pageTitle || 'master_images').replace(/[^a-zA-Z0-9_-]/g, '_');
-      triggerBlobDownload(blob, `${safeTitle}_fullres_${Date.now()}.zip`);
-      setLocalZipProgress('ZIP downloaded successfully!');
+    if (localArchiveAbortRef.current === controller) {
+      localArchiveAbortRef.current = null;
+    }
+
+    setIsZippingLocal(false);
+    if (result.success) {
+      setLocalZipProgress(`${formatUpper} downloaded successfully (100%)!`);
       setTimeout(() => setLocalZipProgress(null), 3000);
-    } catch (err: any) {
-      setLocalZipProgress(`Server ZIP download failed: ${err.message}`);
-    } finally {
-      setIsZippingLocal(false);
+    } else if (result.cancelled) {
+      setLocalZipProgress(`Cancelled .${formatUpper} download.`);
+    } else {
+      setLocalZipProgress(`Server ${formatUpper} download failed: ${result.error || 'Unknown error'}`);
     }
   };
 
@@ -341,6 +403,7 @@ export const FullImageLinksModal: React.FC<FullImageLinksModalProps> = ({
               filters={filters}
               facets={facets}
               onToggle={toggleFilterBool}
+              faceScanStatus={faceScanStatus}
               compact
             />
 
@@ -372,6 +435,16 @@ export const FullImageLinksModal: React.FC<FullImageLinksModalProps> = ({
               </button>
             )}
           </div>
+
+          {faceScanStatus?.error && (
+            <div
+              role="alert"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/35 border border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 text-[11px]"
+            >
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>{faceScanStatus.error}</span>
+            </div>
+          )}
         </div>
 
         {/* Modal Main Content Area */}
@@ -504,6 +577,8 @@ export const FullImageLinksModal: React.FC<FullImageLinksModalProps> = ({
                             <img
                               src={img.thumbnailUrl}
                               alt={img.filename}
+                              loading={idx < 12 ? 'eager' : 'lazy'}
+                              decoding="async"
                               referrerPolicy="no-referrer"
                               onError={(e) => {
                                 const target = e.currentTarget;
@@ -720,14 +795,32 @@ export const FullImageLinksModal: React.FC<FullImageLinksModalProps> = ({
           )}
         </div>
 
+        {/* Inline Archive Progress Bar inside Modal when active */}
+        {activeArchiveProgress && (
+          <div className="px-5 pt-3 border-t border-zinc-200 dark:border-zinc-800 bg-[#F9F9FB] dark:bg-[#0B0C10]">
+            <ArchiveDownloadBar
+              compact
+              progress={activeArchiveProgress}
+              onPause={onPauseArchiveDownload}
+              onResume={onResumeArchiveDownload}
+              onCancel={
+                onCancelArchiveDownload ?? (() => localArchiveAbortRef.current?.abort())
+              }
+              onDismiss={
+                onDismissArchiveDownload ?? (() => setLocalArchiveProgress(null))
+              }
+            />
+          </div>
+        )}
+
         {/* Footer: Single Cobalt Primary CTA + High-Contrast Neutral Secondary + Close */}
         <div className="px-5 py-3.5 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#111318] flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400 font-sans">
             <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-500 shrink-0" />
             <span className="tabular-nums">
               {isBusyZipping
-                ? currentZipProgress || 'Packaging master images into ZIP on server...'
-                : `Ready for parallel direct save or ZIP packaging (${filteredImages.length} images)`}
+                ? currentZipProgress || `Packaging master images into .${activeArchiveFormat.toUpperCase()} on server...`
+                : `Ready for parallel direct save or .${activeArchiveFormat.toUpperCase()} archive (${filteredImages.length} images)`}
             </span>
           </div>
 
@@ -745,18 +838,48 @@ export const FullImageLinksModal: React.FC<FullImageLinksModalProps> = ({
               </button>
             )}
 
+            <div
+              role="group"
+              aria-label="Modal archive compression format"
+              className="inline-flex items-center p-0.5 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg font-sans shrink-0"
+            >
+              {(['7z', 'zip'] as const).map((fmt) => (
+                <button
+                  key={fmt}
+                  type="button"
+                  onClick={() => setActiveArchiveFormat(fmt)}
+                  aria-pressed={activeArchiveFormat === fmt}
+                  disabled={isBusyZipping}
+                  title={
+                    fmt === '7z'
+                      ? '7-Zip LZMA2 compression — smallest files (Default)'
+                      : 'Standard ZIP archive — universal compatibility'
+                  }
+                  className={`px-2 py-1.5 rounded-md text-[11px] font-semibold uppercase tracking-wide transition-colors cursor-pointer disabled:opacity-50 ${
+                    activeArchiveFormat === fmt
+                      ? 'bg-white dark:bg-[#1A1D26] text-zinc-950 dark:text-white shadow-xs'
+                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  {fmt.toUpperCase()}
+                </button>
+              ))}
+            </div>
+
             <button
               type="button"
               onClick={handleServerDownloadZip}
               disabled={filteredImages.length === 0 || isBusyZipping}
               className="flex items-center gap-2 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 rounded-lg font-semibold transition-colors font-sans cursor-pointer whitespace-nowrap tabular-nums"
-              title="Download all listed full-resolution images as a packaged ZIP archive via server"
+              title={`Download all listed full-resolution images as a packaged .${activeArchiveFormat.toUpperCase()} archive via server`}
             >
               <FileArchive className={`w-4 h-4 ${isBusyZipping ? 'animate-bounce' : ''}`} />
               <span>
                 {isBusyZipping
-                  ? currentZipProgress || 'Packaging Server ZIP...'
-                  : `Download Full ZIP (${filteredImages.length})`}
+                  ? activeArchiveProgress?.isRunning
+                    ? `${activeArchiveProgress.percent}% · Packaging .${activeArchiveFormat.toUpperCase()}`
+                    : currentZipProgress || `Packaging Server .${activeArchiveFormat.toUpperCase()}...`
+                  : `Download Full .${activeArchiveFormat.toUpperCase()} (${filteredImages.length})`}
               </span>
             </button>
 

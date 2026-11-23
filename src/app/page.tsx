@@ -1,5 +1,5 @@
-import App from '@/App';
+import { ClientAppMount } from '@/components/ClientAppMount';
 
 export default function HomePage() {
-  return <App />;
+  return <ClientAppMount />;
 }

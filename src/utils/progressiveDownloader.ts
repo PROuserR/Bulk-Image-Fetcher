@@ -1,4 +1,9 @@
 import { buildDownloadFileUrl, triggerBlobDownload } from './downloader';
+import {
+  dedupeImageBlobFetch,
+  getCachedImageBlob,
+  getFullResReusablePreviewUrl,
+} from './clientImageCache';
 
 export interface DownloadItemInput {
   id: string;
@@ -36,7 +41,9 @@ export interface ProgressiveDownloadProgress {
   bytesSaved: number;
   currentItems: string[];
   isRunning: boolean;
+  isPaused: boolean;
   isCancelled: boolean;
+  savedItemIds: string[];
   failedItems: FailedDownloadItem[];
   itemStatuses: Record<string, ItemProgressEntry>;
 }
@@ -48,11 +55,18 @@ export type FetchLike = (
 
 export type SaveBlobLike = (blob: Blob, filename: string) => Promise<void> | void;
 
+export interface ProgressiveResumeState {
+  savedItemIds?: string[];
+  bytesSaved?: number;
+  itemStatuses?: Record<string, ItemProgressEntry>;
+}
+
 export interface ProgressiveDownloadOptions {
   concurrency?: number;
   staggerMs?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
+  initialProgress?: ProgressiveResumeState;
   fetchFn?: FetchLike;
   saveBlobFn?: SaveBlobLike;
   onProgress?: (progress: ProgressiveDownloadProgress) => void;
@@ -136,61 +150,123 @@ export async function fetchImageBlobWithFallbacks(
     fetchFn?: FetchLike;
     timeoutMs?: number;
     signal?: AbortSignal;
+    useCache?: boolean;
   } = {}
 ): Promise<{ blob: Blob | null; resolvedVia?: string; error?: string }> {
   const fetchFn: FetchLike = options.fetchFn || (fetch as unknown as FetchLike);
   const timeoutMs = options.timeoutMs ?? 12000;
   const signal = options.signal;
+  const shouldUseCache = options.useCache !== undefined ? options.useCache : !options.fetchFn;
 
-  const proxyUrl = buildDownloadFileUrl(item.url, item.filename, item.referer, {
-    fallbackUrl: item.fallbackUrl,
-    linkedPageUrl: item.linkedPageUrl,
-    relayUrl: item.relayUrl,
-  });
-
-  // Attempt 1: Same-origin /api/download-file proxy (handles Referer, linkedPageUrl, fallbackUrl, relayUrl)
-  const proxyAttempt = await fetchValidBlobWithTimeout(fetchFn, proxyUrl, {}, timeoutMs, signal);
-  if (proxyAttempt.blob) {
-    return { blob: proxyAttempt.blob, resolvedVia: 'proxy' };
-  }
-  if (signal?.aborted) {
-    return { blob: null, error: 'Cancelled' };
+  if (shouldUseCache && item.url) {
+    const cachedBlob = getCachedImageBlob(item.url);
+    if (cachedBlob) {
+      return { blob: cachedBlob, resolvedVia: 'memory-cache' };
+    }
   }
 
-  // Attempt 2: Direct browser CORS fetch (bypasses server IP blocks / rate limits when host supports CORS)
-  if (item.url && /^https?:\/\//i.test(item.url)) {
-    const directAttempt = await fetchValidBlobWithTimeout(
-      fetchFn,
-      item.url,
-      { mode: 'cors' },
-      Math.min(timeoutMs, 10000),
-      signal
-    );
-    if (directAttempt.blob) {
-      return { blob: directAttempt.blob, resolvedVia: 'direct-cors' };
+  let resolvedViaResult: string | undefined;
+  let lastError: string | undefined;
+
+  const executeFetch = async (): Promise<Blob | null> => {
+    if (shouldUseCache && item.url) {
+      const cachedPreviewUrl = getFullResReusablePreviewUrl(item.url);
+      if (cachedPreviewUrl) {
+        const cacheInit: RequestInit = cachedPreviewUrl.startsWith('/api/')
+          ? { cache: 'force-cache' }
+          : { mode: 'cors', cache: 'force-cache' };
+        const cacheAttempt = await fetchValidBlobWithTimeout(
+          fetchFn,
+          cachedPreviewUrl,
+          cacheInit,
+          Math.min(timeoutMs, 6000),
+          signal
+        );
+        if (cacheAttempt.blob) {
+          resolvedViaResult = 'preview-http-cache';
+          return cacheAttempt.blob;
+        }
+        if (signal?.aborted) {
+          lastError = 'Cancelled';
+          return null;
+        }
+      }
+    }
+
+    const proxyUrl = buildDownloadFileUrl(item.url, item.filename, item.referer, {
+      fallbackUrl: item.fallbackUrl,
+      linkedPageUrl: item.linkedPageUrl,
+      relayUrl: item.relayUrl,
+    });
+
+    // Attempt 1: Same-origin /api/download-file proxy (handles Referer, linkedPageUrl, fallbackUrl, relayUrl)
+    const proxyAttempt = await fetchValidBlobWithTimeout(fetchFn, proxyUrl, {}, timeoutMs, signal);
+    if (proxyAttempt.blob) {
+      resolvedViaResult = 'proxy';
+      return proxyAttempt.blob;
     }
     if (signal?.aborted) {
-      return { blob: null, error: 'Cancelled' };
+      lastError = 'Cancelled';
+      return null;
     }
-  }
 
-  // Attempt 3: Fallback URL direct CORS fetch
-  if (item.fallbackUrl && item.fallbackUrl !== item.url && /^https?:\/\//i.test(item.fallbackUrl)) {
-    const fallbackAttempt = await fetchValidBlobWithTimeout(
-      fetchFn,
-      item.fallbackUrl,
-      { mode: 'cors' },
-      Math.min(timeoutMs, 10000),
-      signal
-    );
-    if (fallbackAttempt.blob) {
-      return { blob: fallbackAttempt.blob, resolvedVia: 'fallback-cors' };
+    // Attempt 2: Direct browser CORS fetch (bypasses server IP blocks / rate limits when host supports CORS)
+    if (item.url && /^https?:\/\//i.test(item.url)) {
+      const directAttempt = await fetchValidBlobWithTimeout(
+        fetchFn,
+        item.url,
+        { mode: 'cors' },
+        Math.min(timeoutMs, 10000),
+        signal
+      );
+      if (directAttempt.blob) {
+        resolvedViaResult = 'direct-cors';
+        return directAttempt.blob;
+      }
+      if (signal?.aborted) {
+        lastError = 'Cancelled';
+        return null;
+      }
     }
+
+    // Attempt 3: Fallback URL direct CORS fetch
+    if (item.fallbackUrl && item.fallbackUrl !== item.url && /^https?:\/\//i.test(item.fallbackUrl)) {
+      const fallbackAttempt = await fetchValidBlobWithTimeout(
+        fetchFn,
+        item.fallbackUrl,
+        { mode: 'cors' },
+        Math.min(timeoutMs, 10000),
+        signal
+      );
+      if (fallbackAttempt.blob) {
+        resolvedViaResult = 'fallback-cors';
+        return fallbackAttempt.blob;
+      }
+    }
+
+    lastError = proxyAttempt.reason || 'Remote host blocked or timed out';
+    return null;
+  };
+
+  const blob =
+    shouldUseCache && item.url && !signal
+      ? await dedupeImageBlobFetch(item.url, executeFetch)
+      : await executeFetch();
+
+  if (blob) {
+    if (shouldUseCache && item.url && resolvedViaResult !== 'memory-cache') {
+      // dedupeImageBlobFetch already caches when !signal; ensure cached when signal was passed
+      if (signal) {
+        const { setCachedImageBlob } = await import('./clientImageCache');
+        setCachedImageBlob(item.url, blob);
+      }
+    }
+    return { blob, resolvedVia: resolvedViaResult || 'cache' };
   }
 
   return {
     blob: null,
-    error: proxyAttempt.reason || 'Remote host blocked or timed out',
+    error: lastError || 'Remote host blocked or timed out',
   };
 }
 
@@ -218,16 +294,32 @@ export async function runProgressiveDownloads(
   const saveBlobFn: SaveBlobLike =
     options.saveBlobFn || ((blob, filename) => triggerBlobDownload(blob, filename));
 
+  const alreadySavedSet = new Set<string>(options.initialProgress?.savedItemIds || []);
   const itemStatuses: Record<string, ItemProgressEntry> = {};
+  const pendingItems: DownloadItemInput[] = [];
+  let saved = 0;
+
   for (const item of items) {
-    itemStatuses[item.id] = { status: 'pending' };
+    if (alreadySavedSet.has(item.id)) {
+      const prior = options.initialProgress?.itemStatuses?.[item.id];
+      itemStatuses[item.id] = prior?.status === 'saved' ? prior : { status: 'saved' };
+      saved++;
+    } else {
+      itemStatuses[item.id] = { status: 'pending' };
+      pendingItems.push(item);
+    }
   }
 
   const activeSet = new Set<string>();
   const failedItems: FailedDownloadItem[] = [];
-  let saved = 0;
+  const savedItemIdsSet = new Set<string>(
+    items.filter((it) => alreadySavedSet.has(it.id)).map((it) => it.id)
+  );
   let failed = 0;
-  let bytesSaved = 0;
+  let bytesSaved = options.initialProgress?.bytesSaved ?? 0;
+
+  const isPausedSignal = () => Boolean(signal?.aborted && signal.reason === 'PAUSED');
+  const isCancelledSignal = () => Boolean(signal?.aborted && signal.reason !== 'PAUSED');
 
   const buildSnapshot = (isRunning: boolean): ProgressiveDownloadProgress => {
     const completed = saved + failed;
@@ -242,7 +334,9 @@ export async function runProgressiveDownloads(
       bytesSaved,
       currentItems: Array.from(activeSet),
       isRunning,
-      isCancelled: Boolean(signal?.aborted),
+      isPaused: !isRunning && isPausedSignal(),
+      isCancelled: !isRunning && isCancelledSignal(),
+      savedItemIds: Array.from(savedItemIdsSet),
       failedItems: [...failedItems],
       itemStatuses: { ...itemStatuses },
     };
@@ -252,7 +346,7 @@ export async function runProgressiveDownloads(
     options.onProgress?.(buildSnapshot(isRunning));
   };
 
-  if (total === 0) {
+  if (total === 0 || pendingItems.length === 0) {
     const emptySnapshot = buildSnapshot(false);
     options.onProgress?.(emptySnapshot);
     return emptySnapshot;
@@ -285,9 +379,9 @@ export async function runProgressiveDownloads(
     while (true) {
       if (signal?.aborted) return;
       const myIndex = cursor++;
-      if (myIndex >= items.length) return;
+      if (myIndex >= pendingItems.length) return;
 
-      const item = items[myIndex];
+      const item = pendingItems[myIndex];
       itemStatuses[item.id] = { status: 'downloading' };
       activeSet.add(item.filename);
       emit(true);
@@ -301,16 +395,30 @@ export async function runProgressiveDownloads(
       activeSet.delete(item.filename);
 
       if (signal?.aborted) {
-        itemStatuses[item.id] = { status: 'failed', error: 'Cancelled' };
-        emit(true);
+        // When paused, leave unfinished items as 'pending' so resuming picks them up seamlessly
+        itemStatuses[item.id] = isPausedSignal()
+          ? { status: 'pending' }
+          : { status: 'failed', error: 'Cancelled' };
+        if (isPausedSignal()) {
+          // Wait for outer termination to emit final paused snapshot
+        } else {
+          emit(true);
+        }
         return;
       }
 
       if (blob && blob.size > 0) {
         try {
           await enqueueDiskSave(blob, item.filename);
+          if (signal?.aborted) {
+            itemStatuses[item.id] = isPausedSignal()
+              ? { status: 'pending' }
+              : { status: 'failed', error: 'Cancelled' };
+            return;
+          }
           saved++;
           bytesSaved += blob.size;
+          savedItemIdsSet.add(item.id);
           itemStatuses[item.id] = {
             status: 'saved',
             bytes: blob.size,
@@ -343,7 +451,7 @@ export async function runProgressiveDownloads(
     }
   };
 
-  const workerCount = Math.min(concurrency, total);
+  const workerCount = Math.min(concurrency, pendingItems.length);
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
   await saveChain;
 

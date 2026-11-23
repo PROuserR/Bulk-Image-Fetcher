@@ -1,4 +1,5 @@
 import { gotScraping } from 'got-scraping';
+import pLimit from 'p-limit';
 import {
   extractImagesFromHtml,
   parsePreviewUrlsOrManifest,
@@ -83,6 +84,31 @@ export function resolveVirtualPresetHtml(
   return null;
 }
 
+const PAGE_HTML_CACHE = new Map<string, { expiresAt: number; result: HtmlFetchResult }>();
+const INFLIGHT_PAGE_HTML = new Map<string, Promise<HtmlFetchResult>>();
+const PAGE_CACHE_TTL_MS = 90_000;
+const PAGE_CACHE_MAX_ENTRIES = 150;
+
+function cachePageHtml(key: string, res: HtmlFetchResult) {
+  if (
+    !res.ok ||
+    !res.html ||
+    res.html.length > 2_000_000 ||
+    isGeoBlockedHtml(res.html, res.url) ||
+    isBotChallengeHtml(res.html)
+  ) {
+    return;
+  }
+  if (PAGE_HTML_CACHE.size >= PAGE_CACHE_MAX_ENTRIES) {
+    const oldest = PAGE_HTML_CACHE.keys().next().value;
+    if (oldest) PAGE_HTML_CACHE.delete(oldest);
+  }
+  PAGE_HTML_CACHE.set(key, {
+    expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
+    result: res,
+  });
+}
+
 export async function fetchHtmlWithFallback(
   rawTargetUrl: string,
   relayUrl?: string,
@@ -101,119 +127,152 @@ export async function fetchHtmlWithFallback(
   }
 
   const cleanRelay = (relayUrl || '').trim();
-  if (preferNonUkRelay && !cleanRelay) {
-    return fetchHtmlViaNonUkRelay(rawTargetUrl, timeoutMs);
+  const cacheKey = `${preferNonUkRelay ? '1' : '0'}|${cleanRelay}|${rawTargetUrl}`;
+
+  const cached = PAGE_HTML_CACHE.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
+  }
+  if (cached) {
+    PAGE_HTML_CACHE.delete(cacheKey);
   }
 
-  const proxiedUrl = buildRelayTarget(rawTargetUrl, cleanRelay);
-  const fetchResponse = await fetch(proxiedUrl, {
-    headers: {
-      'User-Agent': DEFAULT_USER_AGENT,
-      Accept: HTML_ACCEPT_HEADER,
-      'Accept-Language': 'en-US,en;q=0.8',
-    },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-
-  const resolvedUrl = cleanRelay ? rawTargetUrl : fetchResponse.url || rawTargetUrl;
-  const html = await fetchResponse.text();
-
-  // If UK geo-block detected and no custom relay was provided, auto-retry via non-UK relay
-  if (isGeoBlockedHtml(html, resolvedUrl)) {
-    if (!cleanRelay) {
-      const relayRes = await fetchHtmlViaNonUkRelay(rawTargetUrl, Math.max(timeoutMs, 15000));
-      if (relayRes.ok && relayRes.html && !isGeoBlockedHtml(relayRes.html, relayRes.url)) {
-        return relayRes;
-      }
-    }
-    return {
-      ok: fetchResponse.ok,
-      status: fetchResponse.status,
-      statusText: fetchResponse.statusText,
-      url: resolvedUrl,
-      html,
-    };
+  const inflight = INFLIGHT_PAGE_HTML.get(cacheKey);
+  if (inflight) {
+    return inflight;
   }
 
-  const hitChallenge = isBotChallengeHtml(html);
-
-  // Fallback to TLS-fingerprinted Chrome request on Cloudflare / bot challenges (403, 429, 503, or JS challenge)
-  if (
-    hitChallenge ||
-    (!fetchResponse.ok &&
-      (fetchResponse.status === 403 || fetchResponse.status === 429 || fetchResponse.status === 503))
-  ) {
+  const promise = (async (): Promise<HtmlFetchResult> => {
     try {
-      let originReferer = '';
-      try {
-        originReferer = `${new URL(rawTargetUrl).origin}/`;
-      } catch {}
+      if (preferNonUkRelay && !cleanRelay) {
+        const res = await fetchHtmlViaNonUkRelay(rawTargetUrl, timeoutMs);
+        cachePageHtml(cacheKey, res);
+        return res;
+      }
 
-      const gotRes = await gotScraping({
-        url: proxiedUrl,
-        method: 'GET',
-        throwHttpErrors: false,
-        timeout: { request: Math.min(timeoutMs, 12000) },
-        retry: { limit: 1 },
-        headers: originReferer ? { Referer: originReferer } : undefined,
-        headerGeneratorOptions: {
-          browsers: [{ name: 'chrome', minVersion: 128 }],
-          devices: ['desktop'],
-          operatingSystems: ['windows', 'macos'],
-          locales: ['en-US'],
+      const proxiedUrl = buildRelayTarget(rawTargetUrl, cleanRelay);
+      const fetchResponse = await fetch(proxiedUrl, {
+        headers: {
+          'User-Agent': DEFAULT_USER_AGENT,
+          Accept: HTML_ACCEPT_HEADER,
+          'Accept-Language': 'en-US,en;q=0.8',
         },
+        signal: AbortSignal.timeout(timeoutMs),
       });
-      const gotBody =
-        typeof gotRes.body === 'string' ? gotRes.body : String(gotRes.body ?? '');
-      if (gotBody && isGeoBlockedHtml(gotBody, gotRes.url)) {
+
+      const resolvedUrl = cleanRelay ? rawTargetUrl : fetchResponse.url || rawTargetUrl;
+      const html = await fetchResponse.text();
+
+      // If UK geo-block detected and no custom relay was provided, auto-retry via non-UK relay
+      if (isGeoBlockedHtml(html, resolvedUrl)) {
         if (!cleanRelay) {
-          const relayRes = await fetchHtmlViaNonUkRelay(
-            rawTargetUrl,
-            Math.max(timeoutMs, 15000)
-          );
+          const relayRes = await fetchHtmlViaNonUkRelay(rawTargetUrl, Math.max(timeoutMs, 15000));
           if (relayRes.ok && relayRes.html && !isGeoBlockedHtml(relayRes.html, relayRes.url)) {
+            cachePageHtml(cacheKey, relayRes);
+            return relayRes;
+          }
+        }
+        return {
+          ok: fetchResponse.ok,
+          status: fetchResponse.status,
+          statusText: fetchResponse.statusText,
+          url: resolvedUrl,
+          html,
+        };
+      }
+
+      const hitChallenge = isBotChallengeHtml(html);
+
+      // Fallback to TLS-fingerprinted Chrome request on Cloudflare / bot challenges (403, 429, 503, or JS challenge)
+      if (
+        hitChallenge ||
+        (!fetchResponse.ok &&
+          (fetchResponse.status === 403 || fetchResponse.status === 429 || fetchResponse.status === 503))
+      ) {
+        try {
+          let originReferer = '';
+          try {
+            originReferer = `${new URL(rawTargetUrl).origin}/`;
+          } catch {}
+
+          const gotRes = await gotScraping({
+            url: proxiedUrl,
+            method: 'GET',
+            throwHttpErrors: false,
+            timeout: { request: Math.min(timeoutMs, 12000) },
+            retry: { limit: 1 },
+            headers: originReferer ? { Referer: originReferer } : undefined,
+            headerGeneratorOptions: {
+              browsers: [{ name: 'chrome', minVersion: 128 }],
+              devices: ['desktop'],
+              operatingSystems: ['windows', 'macos'],
+              locales: ['en-US'],
+            },
+          });
+          const gotBody =
+            typeof gotRes.body === 'string' ? gotRes.body : String(gotRes.body ?? '');
+          if (gotBody && isGeoBlockedHtml(gotBody, gotRes.url)) {
+            if (!cleanRelay) {
+              const relayRes = await fetchHtmlViaNonUkRelay(
+                rawTargetUrl,
+                Math.max(timeoutMs, 15000)
+              );
+              if (relayRes.ok && relayRes.html && !isGeoBlockedHtml(relayRes.html, relayRes.url)) {
+                cachePageHtml(cacheKey, relayRes);
+                return relayRes;
+              }
+            }
+          }
+          if (
+            gotBody &&
+            gotRes.statusCode >= 200 &&
+            gotRes.statusCode < 300 &&
+            !isBotChallengeHtml(gotBody)
+          ) {
+            const okRes: HtmlFetchResult = {
+              ok: true,
+              status: gotRes.statusCode,
+              statusText: String(gotRes.statusMessage || ''),
+              url: gotRes.url || resolvedUrl,
+              html: gotBody,
+            };
+            cachePageHtml(cacheKey, okRes);
+            return okRes;
+          }
+        } catch {
+          // Keep original fetch response if gotScraping fails
+        }
+
+        if (!cleanRelay) {
+          const relayRes = await fetchHtmlViaNonUkRelay(rawTargetUrl, Math.max(timeoutMs, 15000));
+          if (
+            relayRes.ok &&
+            relayRes.html &&
+            !isGeoBlockedHtml(relayRes.html, relayRes.url) &&
+            !isBotChallengeHtml(relayRes.html)
+          ) {
+            cachePageHtml(cacheKey, relayRes);
             return relayRes;
           }
         }
       }
-      if (
-        gotBody &&
-        gotRes.statusCode >= 200 &&
-        gotRes.statusCode < 300 &&
-        !isBotChallengeHtml(gotBody)
-      ) {
-        return {
-          ok: true,
-          status: gotRes.statusCode,
-          statusText: String(gotRes.statusMessage || ''),
-          url: gotRes.url || resolvedUrl,
-          html: gotBody,
-        };
-      }
-    } catch {
-      // Keep original fetch response if gotScraping fails
-    }
 
-    if (!cleanRelay) {
-      const relayRes = await fetchHtmlViaNonUkRelay(rawTargetUrl, Math.max(timeoutMs, 15000));
-      if (
-        relayRes.ok &&
-        relayRes.html &&
-        !isGeoBlockedHtml(relayRes.html, relayRes.url) &&
-        !isBotChallengeHtml(relayRes.html)
-      ) {
-        return relayRes;
-      }
+      const finalRes: HtmlFetchResult = {
+        ok: fetchResponse.ok && !hitChallenge,
+        status: hitChallenge ? 403 : fetchResponse.status,
+        statusText: hitChallenge ? 'Bot Challenge' : fetchResponse.statusText,
+        url: resolvedUrl,
+        html,
+      };
+      cachePageHtml(cacheKey, finalRes);
+      return finalRes;
+    } finally {
+      INFLIGHT_PAGE_HTML.delete(cacheKey);
     }
-  }
+  })();
 
-  return {
-    ok: fetchResponse.ok && !hitChallenge,
-    status: hitChallenge ? 403 : fetchResponse.status,
-    statusText: hitChallenge ? 'Bot Challenge' : fetchResponse.statusText,
-    url: resolvedUrl,
-    html,
-  };
+  INFLIGHT_PAGE_HTML.set(cacheKey, promise);
+  return promise;
 }
 
 export interface ScrapeSingleGalleryParams {
@@ -221,6 +280,7 @@ export interface ScrapeSingleGalleryParams {
   customHtml?: string;
   followLinkedPages?: boolean;
   relayUrl?: string;
+  useCache?: boolean;
 }
 
 export interface ScrapeSingleGalleryResponse {
@@ -234,10 +294,88 @@ export interface ScrapeSingleGalleryResponse {
   result?: ExtractionResult;
 }
 
+const SCRAPE_RESULT_CACHE = new Map<
+  string,
+  { expiresAt: number; response: ScrapeSingleGalleryResponse }
+>();
+const INFLIGHT_SCRAPE_RESULT = new Map<string, Promise<ScrapeSingleGalleryResponse>>();
+const SCRAPE_RESULT_TTL_MS = 90_000;
+const SCRAPE_RESULT_MAX_ENTRIES = 60;
+
+export function clearScrapeResultCache(): void {
+  SCRAPE_RESULT_CACHE.clear();
+  INFLIGHT_SCRAPE_RESULT.clear();
+}
+
+function getScrapeCacheKey(
+  targetUrl: string,
+  followLinkedPages: boolean,
+  relayUrl?: string
+): string {
+  const normalized = normalizeGalleryFetchUrl(targetUrl);
+  return `${followLinkedPages ? '1' : '0'}|${(relayUrl || '').trim()}|${normalized}`;
+}
+
+function cacheScrapeResult(key: string, response: ScrapeSingleGalleryResponse) {
+  if (!response.ok || response.geoBlocked || !response.result) return;
+  if (SCRAPE_RESULT_CACHE.size >= SCRAPE_RESULT_MAX_ENTRIES) {
+    const oldest = SCRAPE_RESULT_CACHE.keys().next().value;
+    if (oldest) SCRAPE_RESULT_CACHE.delete(oldest);
+  }
+  SCRAPE_RESULT_CACHE.set(key, {
+    expiresAt: Date.now() + SCRAPE_RESULT_TTL_MS,
+    response,
+  });
+}
+
 /**
  * Full single-gallery extraction pipeline (live HTTP/relay fetch + ImageFap pagination + linked detail master crawling).
+ * Deduplicates concurrent scrapes and caches clean live extraction results cleanly.
  */
 export async function scrapeSingleGallery(
+  params: ScrapeSingleGalleryParams
+): Promise<ScrapeSingleGalleryResponse> {
+  const { url: rawUrl, customHtml, followLinkedPages = true, relayUrl, useCache = true } = params;
+  const targetUrl = String(rawUrl || '').trim();
+  const hasCustomHtml = Boolean(customHtml && String(customHtml).trim());
+  const isPreset = targetUrl.startsWith('preset:') || targetUrl.startsWith('mock:');
+
+  if (!useCache || hasCustomHtml || isPreset || !targetUrl) {
+    return executeScrapeSingleGallery(params);
+  }
+
+  const cacheKey = getScrapeCacheKey(targetUrl, followLinkedPages, relayUrl);
+  const cached = SCRAPE_RESULT_CACHE.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    // Refresh LRU recency
+    SCRAPE_RESULT_CACHE.delete(cacheKey);
+    SCRAPE_RESULT_CACHE.set(cacheKey, cached);
+    return cached.response;
+  }
+  if (cached) {
+    SCRAPE_RESULT_CACHE.delete(cacheKey);
+  }
+
+  const inflight = INFLIGHT_SCRAPE_RESULT.get(cacheKey);
+  if (inflight) {
+    return inflight;
+  }
+
+  const promise = (async () => {
+    try {
+      const response = await executeScrapeSingleGallery(params);
+      cacheScrapeResult(cacheKey, response);
+      return response;
+    } finally {
+      INFLIGHT_SCRAPE_RESULT.delete(cacheKey);
+    }
+  })();
+
+  INFLIGHT_SCRAPE_RESULT.set(cacheKey, promise);
+  return promise;
+}
+
+async function executeScrapeSingleGallery(
   params: ScrapeSingleGalleryParams
 ): Promise<ScrapeSingleGalleryResponse> {
   const { url: rawUrl, customHtml, followLinkedPages = true, relayUrl } = params;
@@ -383,12 +521,10 @@ export async function scrapeSingleGallery(
       ? extractImagefapPaginationUrls(htmlToParse, finalUrl, 25)
       : extractAlbumPaginationUrls(htmlToParse, finalUrl, 10);
     if (paginationUrls.length > 0) {
-      const extraResults: ExtractionResult[] = [];
-      const PAGE_BATCH_SIZE = usedNonUkRelay ? 2 : 4;
-      for (let i = 0; i < paginationUrls.length; i += PAGE_BATCH_SIZE) {
-        const chunk = paginationUrls.slice(i, i + PAGE_BATCH_SIZE);
-        const chunkResults = await Promise.all(
-          chunk.map(async (pageHref) => {
+      const pageLimit = pLimit(usedNonUkRelay ? 3 : 6);
+      const settledPages = await Promise.all(
+        paginationUrls.map((pageHref) =>
+          pageLimit(async () => {
             try {
               const pageRes = await fetchHtmlWithFallback(
                 pageHref,
@@ -403,11 +539,11 @@ export async function scrapeSingleGallery(
               return null;
             }
           })
-        );
-        for (const res of chunkResults) {
-          if (res && res.images.length > 0) extraResults.push(res);
-        }
-      }
+        )
+      );
+      const extraResults = settledPages.filter(
+        (res): res is ExtractionResult => Boolean(res && res.images.length > 0)
+      );
       if (extraResults.length > 0) {
         extracted = mergeExtractedGalleryPages(extracted, extraResults);
       }
@@ -422,7 +558,7 @@ export async function scrapeSingleGallery(
     const resolutionResult = await resolveLinkedFullResGallery({
       images: extracted.images,
       pageUrl: finalUrl,
-      batchSize: usedNonUkRelay ? 2 : 5,
+      batchSize: usedNonUkRelay ? 3 : 8,
       fetchDetailHtml: async (detailUrl, timeoutMs) => {
         const res = await fetchHtmlWithFallback(detailUrl, relayUrl, timeoutMs, usedNonUkRelay);
         if (res.usedNonUkRelay) usedNonUkRelay = true;

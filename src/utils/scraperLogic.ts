@@ -347,6 +347,14 @@ export interface PreviewStateInfo {
 
 export type OrientationFilter = 'all' | 'landscape' | 'portrait' | 'square';
 
+export interface FaceScanResult {
+  hasHumanFace: boolean;
+  faceCount: number;
+  confidence: number;
+  subjectSummary: string;
+  error?: string;
+}
+
 export interface GalleryFilterState {
   onlyMasters: boolean;
   onlyPreviewable: boolean;
@@ -354,6 +362,7 @@ export interface GalleryFilterState {
   onlyWithSubpage: boolean;
   onlyHighRes: boolean;
   excludeIconsAndSmall: boolean;
+  onlyHumanFaces: boolean;
   format: string;
   resolution: string;
   orientation: OrientationFilter;
@@ -368,6 +377,7 @@ export const DEFAULT_GALLERY_FILTERS: GalleryFilterState = {
   onlyWithSubpage: false,
   onlyHighRes: false,
   excludeIconsAndSmall: false,
+  onlyHumanFaces: false,
   format: 'all',
   resolution: 'all',
   orientation: 'all',
@@ -487,7 +497,8 @@ export function isIconOrSmallGraphic(
 export function filterScrapedImages(
   images: ScrapedImage[],
   filters: GalleryFilterState,
-  previewMap?: Record<string, PreviewStateInfo>
+  previewMap?: Record<string, PreviewStateInfo>,
+  faceScanMap?: Record<string, FaceScanResult>
 ): ScrapedImage[] {
   const query = filters.searchQuery.trim().toLowerCase();
 
@@ -505,6 +516,10 @@ export function filterScrapedImages(
       if (!isHdOr4k) return false;
     }
     if (filters.excludeIconsAndSmall && isIconOrSmallGraphic(img, previewInfo)) return false;
+    if (filters.onlyHumanFaces) {
+      const faceDecision = faceScanMap?.[img.id];
+      if (!faceDecision || !faceDecision.hasHumanFace) return false;
+    }
 
     if (filters.format !== 'all' && img.format !== filters.format) return false;
 
@@ -557,6 +572,7 @@ export function countActiveFilters(filters: GalleryFilterState): number {
   if (filters.onlyWithSubpage) count++;
   if (filters.onlyHighRes) count++;
   if (filters.excludeIconsAndSmall) count++;
+  if (filters.onlyHumanFaces) count++;
   if (filters.format !== 'all') count++;
   if (filters.resolution !== 'all') count++;
   if (filters.orientation !== 'all') count++;
@@ -570,7 +586,8 @@ export function countActiveFilters(filters: GalleryFilterState): number {
  */
 export function getFilterFacetCounts(
   images: ScrapedImage[],
-  previewMap?: Record<string, PreviewStateInfo>
+  previewMap?: Record<string, PreviewStateInfo>,
+  faceScanMap?: Record<string, FaceScanResult>
 ) {
   let masters = 0;
   let previewable = 0;
@@ -579,6 +596,9 @@ export function getFilterFacetCounts(
   let withSubpage = 0;
   let highRes = 0;
   let nonIcons = 0;
+  let humanFaces = 0;
+  let noFaceExcluded = 0;
+  let faceScanned = 0;
   let landscape = 0;
   let portrait = 0;
   let square = 0;
@@ -600,6 +620,13 @@ export function getFilterFacetCounts(
     }
     if (!isIconOrSmallGraphic(img, info)) nonIcons++;
 
+    const faceDecision = faceScanMap?.[img.id];
+    if (faceDecision) {
+      faceScanned++;
+      if (faceDecision.hasHumanFace) humanFaces++;
+      else noFaceExcluded++;
+    }
+
     const orient = getImageOrientation(img, info);
     if (orient === 'landscape') landscape++;
     else if (orient === 'portrait') portrait++;
@@ -614,6 +641,9 @@ export function getFilterFacetCounts(
     withSubpage,
     highRes,
     nonIcons,
+    humanFaces,
+    noFaceExcluded,
+    faceScanned,
     landscape,
     portrait,
     square,
