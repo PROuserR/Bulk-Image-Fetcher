@@ -63,7 +63,7 @@ export const ProgressiveDownloadBar: React.FC<ProgressiveDownloadBarProps> = ({
     <section
       aria-label="Progressive direct download status"
       data-testid="progressive-download-bar"
-      className="bg-white dark:bg-[#111318] rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 transition-colors"
+      className="bg-white dark:bg-[#101218] rounded-xl border border-[#E2DED3] dark:border-white/[0.08] p-4 transition-colors"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">

@@ -24,7 +24,7 @@ export interface StudioNavEntry {
   label: string;
   compactLabel: string;
   subtitle: string;
-  group: 'Capture' | 'Post-Production' | 'System';
+  group: 'Capture & Ingestion' | 'Processing & Vision' | 'Environment';
   shortcut: string;
   icon: React.FC<{ className?: string }>;
 }
@@ -32,10 +32,10 @@ export interface StudioNavEntry {
 export const STUDIO_NAV_ITEMS: StudioNavEntry[] = [
   {
     id: 'scraper',
-    label: 'Scraper Studio',
-    compactLabel: 'Scraper',
-    subtitle: 'Un-shrink & crawl pages',
-    group: 'Capture',
+    label: 'Capture Studio',
+    compactLabel: 'Capture',
+    subtitle: 'Extract, un-shrink & crawl',
+    group: 'Capture & Ingestion',
     shortcut: '1',
     icon: Globe,
   },
@@ -44,52 +44,52 @@ export const STUDIO_NAV_ITEMS: StudioNavEntry[] = [
     label: 'Crop & Resize',
     compactLabel: 'Crop',
     subtitle: 'Aspect ratios & batch trim',
-    group: 'Post-Production',
+    group: 'Processing & Vision',
     shortcut: '2',
     icon: Crop,
   },
   {
     id: 'filters',
-    label: 'Filter Studio',
+    label: 'Filter & Lenses',
     compactLabel: 'Filters',
-    subtitle: 'Color grading & lenses',
-    group: 'Post-Production',
+    subtitle: 'Color grading & AR lenses',
+    group: 'Processing & Vision',
     shortcut: '3',
     icon: Wand2,
   },
   {
     id: 'gif',
-    label: 'GIF Maker',
+    label: 'GIF89a Motion',
     compactLabel: 'GIF',
     subtitle: 'Frames, loops & captions',
-    group: 'Post-Production',
+    group: 'Processing & Vision',
     shortcut: '4',
     icon: Film,
   },
   {
     id: 'classifier',
-    label: 'Human Classifier',
+    label: 'Face & ID Sort',
     compactLabel: 'Classifier',
-    subtitle: 'Offline identity sort',
-    group: 'Post-Production',
+    subtitle: 'Identity clustering & sort',
+    group: 'Processing & Vision',
     shortcut: '5',
     icon: Users,
   },
   {
     id: 'gemma',
-    label: 'Gemma 4 AI',
+    label: 'Gemma 4 Vision',
     compactLabel: 'Gemma 4',
-    subtitle: 'Local vision & captions',
-    group: 'Post-Production',
+    subtitle: 'Multimodal caption & chat',
+    group: 'Processing & Vision',
     shortcut: '6',
     icon: Sparkles,
   },
   {
     id: 'docs',
-    label: 'Setup & Deployment',
+    label: 'Setup & Runtime',
     compactLabel: 'Setup',
-    subtitle: 'Docker & Python guide',
-    group: 'System',
+    subtitle: 'Docker, Python & deploy',
+    group: 'Environment',
     shortcut: '7',
     icon: BookOpen,
   },
@@ -103,7 +103,11 @@ interface StudioSidebarProps {
   extractedCount: number;
 }
 
-const GROUPS: StudioNavEntry['group'][] = ['Capture', 'Post-Production', 'System'];
+const GROUPS: StudioNavEntry['group'][] = [
+  'Capture & Ingestion',
+  'Processing & Vision',
+  'Environment',
+];
 
 export const StudioSidebar: React.FC<StudioSidebarProps> = ({
   activeTab,
@@ -114,36 +118,43 @@ export const StudioSidebar: React.FC<StudioSidebarProps> = ({
 }) => {
   return (
     <aside
-      aria-label="Workspace Studios"
-      className="hidden md:flex md:w-[232px] lg:w-[252px] shrink-0 flex-col bg-[#FBFBF9] dark:bg-[#0D0F14] border-r border-[#E4E0D6] dark:border-white/[0.08] sticky top-0 h-screen select-none transition-colors"
+      aria-label="Ultimate Image Processing Studios"
+      className="hidden md:flex md:w-[240px] lg:w-[260px] shrink-0 flex-col bg-[#FAF9F5]/95 dark:bg-[#0B0D12]/95 backdrop-blur-md border-r border-[#E2DED3] dark:border-white/[0.08] sticky top-0 h-screen select-none transition-colors"
     >
       {/* Top Brand Wordmark */}
-      <div className="h-14 px-5 flex items-center justify-between border-b border-[#E4E0D6] dark:border-white/[0.08]">
+      <div className="h-14 px-4.5 flex items-center justify-between border-b border-[#E2DED3] dark:border-white/[0.08]">
         <button
           type="button"
           onClick={() => onSelectTab('scraper')}
-          className="flex items-center gap-2.5 text-[#141413] dark:text-[#F5F4F0] font-display font-bold text-lg tracking-tight hover:opacity-80 transition-opacity whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 rounded-md"
-          aria-label="FullRes Scraper Home"
+          className="flex items-center gap-2.5 text-[#141413] dark:text-[#F5F4F0] hover:opacity-85 transition-opacity whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 rounded-md min-w-0"
+          aria-label="Ultimate Image Processing Home"
         >
-          <span className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0">
+          <span className="w-7 h-7 rounded-lg bg-[#141413] dark:bg-blue-600 text-white flex items-center justify-center shrink-0 border border-black/10 dark:border-blue-400/30">
             <Aperture className="w-4 h-4" />
           </span>
-          <span>FullRes</span>
+          <span className="flex flex-col text-left leading-none min-w-0">
+            <span className="font-display font-bold text-[15px] tracking-tight truncate">
+              Ultimate
+            </span>
+            <span className="font-mono text-[10px] text-zinc-500 dark:text-zinc-400 tracking-tight truncate mt-0.5">
+              Image Processing
+            </span>
+          </span>
         </button>
 
         {extractedCount > 0 && (
-          <span className="text-[11px] font-mono tabular-nums text-zinc-500 dark:text-zinc-400">
+          <span className="text-[11px] font-mono tabular-nums text-blue-600 dark:text-blue-400 font-semibold shrink-0">
             {extractedCount} img
           </span>
         )}
       </div>
 
       {/* Quick Command Palette Trigger */}
-      <div className="px-3.5 pt-4 pb-2">
+      <div className="px-3.5 pt-3.5 pb-2">
         <button
           type="button"
           onClick={onOpenCommandPalette}
-          className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#EFECE4]/70 dark:bg-white/[0.04] border border-[#E4E0D6] dark:border-white/[0.08] text-xs text-zinc-600 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-white/20 transition-colors cursor-pointer"
+          className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#EFECE4]/75 dark:bg-white/[0.04] border border-[#E2DED3] dark:border-white/[0.08] text-xs text-zinc-600 dark:text-zinc-300 hover:border-zinc-400 dark:hover:border-white/20 transition-colors cursor-pointer"
         >
           <span className="flex items-center gap-2 truncate">
             <Command className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
@@ -159,7 +170,7 @@ export const StudioSidebar: React.FC<StudioSidebarProps> = ({
       <nav
         role="tablist"
         aria-label="Primary Workspace Studios"
-        className="flex-1 overflow-y-auto px-3 py-3 space-y-6"
+        className="flex-1 overflow-y-auto px-3 py-3 space-y-5"
       >
         {GROUPS.map((group) => {
           const items = STUDIO_NAV_ITEMS.filter((it) => it.group === group);
@@ -185,8 +196,8 @@ export const StudioSidebar: React.FC<StudioSidebarProps> = ({
                     onFocus={() => onPrefetchTab?.(item.id)}
                     className={`w-full flex items-center justify-between gap-2.5 px-2.5 py-2 rounded-xl text-left transition-all duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
                       isActive
-                        ? 'bg-white dark:bg-[#171A23] text-[#141413] dark:text-white border border-[#E4E0D6] dark:border-white/[0.1] shadow-xs'
-                        : 'text-zinc-600 dark:text-zinc-400 border border-transparent hover:bg-[#EFECE4]/60 dark:hover:bg-white/[0.04] hover:text-[#141413] dark:hover:text-zinc-100'
+                        ? 'bg-white dark:bg-[#151822] text-[#141413] dark:text-white border border-[#E2DED3] dark:border-white/[0.12] shadow-xs'
+                        : 'text-zinc-600 dark:text-zinc-400 border border-transparent hover:bg-[#EFECE4]/65 dark:hover:bg-white/[0.04] hover:text-[#141413] dark:hover:text-zinc-100'
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
@@ -221,9 +232,9 @@ export const StudioSidebar: React.FC<StudioSidebarProps> = ({
       </nav>
 
       {/* Clean Studio Info Footer */}
-      <div className="px-4 py-3.5 border-t border-[#E4E0D6] dark:border-white/[0.08] text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center justify-between">
-        <span>Local-first suite</span>
-        <span className="font-mono tabular-nums">7 tools</span>
+      <div className="px-4 py-3 border-t border-[#E2DED3] dark:border-white/[0.08] text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center justify-between">
+        <span>Ultimate Suite</span>
+        <span className="font-mono tabular-nums">7 studios</span>
       </div>
     </aside>
   );

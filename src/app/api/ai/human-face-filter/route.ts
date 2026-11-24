@@ -30,6 +30,13 @@ export async function POST(req: NextRequest) {
         fallbackUrl: typeof img.fallbackUrl === 'string' ? img.fallbackUrl : undefined,
         linkedPageUrl: typeof img.linkedPageUrl === 'string' ? img.linkedPageUrl : undefined,
         filename: typeof img.filename === 'string' ? img.filename : undefined,
+        referer: typeof img.referer === 'string' ? img.referer : undefined,
+        previewDataUrl:
+          typeof img.previewDataUrl === 'string' &&
+          img.previewDataUrl.startsWith('data:image/') &&
+          img.previewDataUrl.length <= 1_500_000
+            ? img.previewDataUrl
+            : undefined,
       }));
 
     if (sanitizedInputs.length === 0) {

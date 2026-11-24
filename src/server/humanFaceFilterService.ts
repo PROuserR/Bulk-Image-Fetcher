@@ -1,8 +1,10 @@
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import sharp from 'sharp';
-import { resolveImageBufferWithFallbacks } from './fetchHelpers';
+import { extractBestImageFromDetailPage } from '@/utils/htmlExtractor';
+import { fetchDetailPageHtmlSmart, resolveImageBufferWithFallbacks } from './fetchHelpers';
 
-export const HUMAN_FACE_FILTER_MODEL = 'gemini-4-hydrogen';
+export const HUMAN_FACE_FILTER_MODEL = 'gemini-3.1-flash-lite';
+export const HUMAN_FACE_FILTER_FALLBACK_MODEL = 'gemini-4-hydrogen';
 
 export interface HumanFaceScanInput {
   id: string;
@@ -11,6 +13,8 @@ export interface HumanFaceScanInput {
   fallbackUrl?: string;
   linkedPageUrl?: string;
   filename?: string;
+  referer?: string;
+  previewDataUrl?: string;
 }
 
 export interface HumanFaceScanDecision {
@@ -23,6 +27,10 @@ export interface HumanFaceScanDecision {
   error?: string;
 }
 
+export type FetchedVisionMedia =
+  | { buffer: Buffer; mimeType: string; skippedReason?: undefined }
+  | { buffer?: undefined; mimeType?: undefined; skippedReason: string };
+
 export interface HumanFaceFilterDependencies {
   apiKey?: string;
   generateContentFn?: (params: {
@@ -30,7 +38,7 @@ export interface HumanFaceFilterDependencies {
     contents: unknown;
     config: unknown;
   }) => Promise<{ text?: string }>;
-  fetchImageFn?: (item: HumanFaceScanInput) => Promise<{ buffer: Buffer; mimeType: string } | null>;
+  fetchImageFn?: (item: HumanFaceScanInput) => Promise<FetchedVisionMedia | null>;
   useCache?: boolean;
 }
 
@@ -107,12 +115,138 @@ function getGeminiClient(apiKey: string): GoogleGenAI {
   return client;
 }
 
+export function decodeBase64DataImage(dataUri?: string): { buffer: Buffer; mimeType: string } | null {
+  if (!dataUri || typeof dataUri !== 'string') return null;
+  const match = dataUri
+    .trim()
+    .match(/^data:(image\/(?:jpeg|jpg|png|webp|gif|svg\+xml|avif));base64,([A-Za-z0-9+/=\s]+)$/i);
+  if (!match) return null;
+  try {
+    const mimeRaw = match[1].toLowerCase();
+    const mimeType = mimeRaw === 'image/jpg' ? 'image/jpeg' : mimeRaw;
+    const buffer = Buffer.from(match[2].replace(/\s+/g, ''), 'base64');
+    if (buffer.byteLength === 0) return null;
+    return { buffer, mimeType };
+  } catch {
+    return null;
+  }
+}
+
+export function detectSupportedVisionMimeFromBytes(buf: Buffer): string | null {
+  if (!buf || buf.byteLength < 12) return null;
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    buf[0] === 0x89 &&
+    buf[1] === 0x50 &&
+    buf[2] === 0x4e &&
+    buf[3] === 0x47 &&
+    buf[4] === 0x0d &&
+    buf[5] === 0x0a &&
+    buf[6] === 0x1a &&
+    buf[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+  // WEBP: RIFF....WEBP
+  if (
+    buf.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buf.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+  return null;
+}
+
+function isSvgOrXmlPayload(buf: Buffer, sourceUrl?: string): boolean {
+  if (sourceUrl && /\.svg(?:$|\?)/i.test(sourceUrl)) {
+    const head = buf.subarray(0, 128).toString('utf8').trimStart().toLowerCase();
+    if (head.startsWith('<svg') || head.startsWith('<?xml')) return true;
+  }
+  const head = buf.subarray(0, 200).toString('utf8').trimStart().toLowerCase();
+  return head.startsWith('<svg') || (head.startsWith('<?xml') && head.includes('<svg'));
+}
+
+export async function normalizeBufferForFaceVision(
+  rawBuffer: Buffer,
+  sourceHint?: string
+): Promise<FetchedVisionMedia | null> {
+  if (!rawBuffer || rawBuffer.byteLength === 0) return null;
+
+  // Reject HTML/JSON/plain-text error payloads early
+  const headText = rawBuffer.subarray(0, 128).toString('utf8').trimStart().toLowerCase();
+  if (
+    headText.startsWith('<!doc') ||
+    headText.startsWith('<html') ||
+    headText.startsWith('{') ||
+    headText.startsWith('[')
+  ) {
+    return null;
+  }
+
+  try {
+    const instance = sharp(rawBuffer, { animated: false });
+    const meta = await instance.metadata().catch(() => null);
+
+    // 1x1 tracking pixels or tiny < 16px UI badges cannot contain a visible human face
+    if (
+      meta &&
+      typeof meta.width === 'number' &&
+      typeof meta.height === 'number' &&
+      meta.width > 0 &&
+      meta.height > 0 &&
+      Math.max(meta.width, meta.height) < 16
+    ) {
+      return { skippedReason: 'Tiny UI icon or spacer' };
+    }
+
+    const resized = await instance
+      .rotate()
+      .resize({
+        width: 384,
+        height: 384,
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: 76, mozjpeg: true })
+      .toBuffer();
+
+    return { buffer: resized, mimeType: 'image/jpeg' };
+  } catch {
+    // If sharp failed to decode (e.g., malformed SVG/ICO/corrupt payload),
+    // never pass arbitrary bytes labeled as JPEG to Gemini—only pass verified raster magic bytes.
+    if (isSvgOrXmlPayload(rawBuffer, sourceHint)) {
+      return { skippedReason: 'Vector graphic / icon' };
+    }
+    const verifiedMime = detectSupportedVisionMimeFromBytes(rawBuffer);
+    if (!verifiedMime) {
+      return null;
+    }
+    return { buffer: rawBuffer, mimeType: verifiedMime };
+  }
+}
+
 async function fetchAndNormalizeImageForVision(
   item: HumanFaceScanInput,
   referer?: string,
   relayUrl?: string
-): Promise<{ buffer: Buffer; mimeType: string } | null> {
-  // Prefer existing preview/thumbnail or full URL from shared server LRU cache
+): Promise<FetchedVisionMedia | null> {
+  // 1. Check client-supplied previewDataUrl or inline data:image URI first
+  const inlineCandidates = [item.previewDataUrl, item.thumbnailUrl, item.url, item.fallbackUrl];
+  for (const candidate of inlineCandidates) {
+    const decoded = decodeBase64DataImage(candidate);
+    if (decoded) {
+      const normalized = await normalizeBufferForFaceVision(decoded.buffer, candidate);
+      if (normalized) return normalized;
+    }
+  }
+
+  const effectiveReferer = (item.referer || referer || '').trim() || undefined;
+
+  // 2. Try HTTP/HTTPS candidates via shared server LRU cache + detail-page fallback
   const candidates = Array.from(
     new Set(
       [item.thumbnailUrl, item.url, item.fallbackUrl].filter(
@@ -121,41 +255,51 @@ async function fetchAndNormalizeImageForVision(
     )
   );
 
-  let rawBuffer: Buffer | null = null;
-  for (const candidateUrl of candidates) {
+  const resolveDetailPageUrl = item.linkedPageUrl
+    ? async (detailUrl: string) => {
+        const subResp = await fetchDetailPageHtmlSmart(detailUrl, {
+          relayUrl: relayUrl && detailUrl.includes(relayUrl) ? '' : relayUrl,
+          timeoutMs: 9000,
+        });
+        if (!subResp.ok) return null;
+        return extractBestImageFromDetailPage(subResp.html, subResp.url || detailUrl)?.url || null;
+      }
+    : undefined;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const candidateUrl = candidates[i];
     const res = await resolveImageBufferWithFallbacks({
       imageUrl: candidateUrl,
-      explicitReferer: referer,
+      explicitReferer: effectiveReferer,
       relayUrl,
       fallbackUrl: item.fallbackUrl,
-      linkedPageUrl: item.linkedPageUrl,
-      minBytes: 256,
+      linkedPageUrl: i === candidates.length - 1 || candidateUrl === item.url ? item.linkedPageUrl : undefined,
+      minBytes: 64,
+      resolveDetailPageUrl,
     });
-    if (res?.buf && res.buf.byteLength >= 256) {
-      rawBuffer = res.buf;
-      break;
+    if (res?.buf && res.buf.byteLength >= 64) {
+      const normalized = await normalizeBufferForFaceVision(res.buf, candidateUrl);
+      if (normalized) return normalized;
     }
   }
 
-  if (!rawBuffer) return null;
-
-  try {
-    const resized = await sharp(rawBuffer, { animated: false })
-      .rotate()
-      .resize({
-        width: 512,
-        height: 512,
-        fit: 'inside',
-        withoutEnlargement: true,
-      })
-      .jpeg({ quality: 75, mozjpeg: true })
-      .toBuffer();
-
-    return { buffer: resized, mimeType: 'image/jpeg' };
-  } catch {
-    // Fallback to raw buffer if sharp cannot decode exotic format (e.g. small WebP/PNG)
-    return { buffer: rawBuffer, mimeType: 'image/jpeg' };
+  // 3. Last-resort detail-page lookup even if no direct HTTP thumbnail/full URL worked
+  if (candidates.length === 0 && item.linkedPageUrl && resolveDetailPageUrl) {
+    const resolvedUrl = await resolveDetailPageUrl(item.linkedPageUrl).catch(() => null);
+    if (resolvedUrl && /^https?:\/\//i.test(resolvedUrl)) {
+      const res = await resolveImageBufferWithFallbacks({
+        imageUrl: resolvedUrl,
+        explicitReferer: effectiveReferer,
+        relayUrl,
+        minBytes: 64,
+      });
+      if (res?.buf && res.buf.byteLength >= 64) {
+        return normalizeBufferForFaceVision(res.buf, resolvedUrl);
+      }
+    }
   }
+
+  return null;
 }
 
 export class HumanFaceFilterError extends Error {
@@ -256,12 +400,13 @@ export async function analyzeImagesForHumanFaces(
   results: HumanFaceScanDecision[];
   cachedCount: number;
   scannedCount: number;
+  errorCount: number;
 }> {
   const { referer, relayUrl, deps } = options;
   const shouldUseCache = deps?.useCache !== undefined ? deps.useCache : !deps?.generateContentFn;
 
   if (!Array.isArray(inputs) || inputs.length === 0) {
-    return { results: [], cachedCount: 0, scannedCount: 0 };
+    return { results: [], cachedCount: 0, scannedCount: 0, errorCount: 0 };
   }
 
   const batch = inputs.slice(0, 12);
@@ -270,8 +415,9 @@ export async function analyzeImagesForHumanFaces(
   let cachedCount = 0;
 
   for (const item of batch) {
-    if (shouldUseCache) {
-      const cached = getCachedDecision(item.url);
+    const cacheKey = item.url || item.thumbnailUrl || '';
+    if (shouldUseCache && cacheKey) {
+      const cached = getCachedDecision(cacheKey);
       if (cached) {
         decisionsById.set(item.id, {
           id: item.id,
@@ -289,6 +435,7 @@ export async function analyzeImagesForHumanFaces(
   }
 
   let scannedCount = 0;
+  let errorCount = 0;
 
   if (pendingToScan.length > 0) {
     const resolvedKey = (deps?.apiKey ?? process.env.GEMINI_API_KEY ?? '').trim();
@@ -310,13 +457,37 @@ export async function analyzeImagesForHumanFaces(
       }))
     );
 
-    const readyItems = fetched.filter(
-      (entry): entry is { item: HumanFaceScanInput; media: { buffer: Buffer; mimeType: string } } =>
-        Boolean(entry.media && entry.media.buffer.byteLength > 0)
-    );
+    const readyItems: Array<{ item: HumanFaceScanInput; media: { buffer: Buffer; mimeType: string } }> = [];
 
     for (const entry of fetched) {
-      if (!entry.media || entry.media.buffer.byteLength === 0) {
+      const m = entry.media;
+      if (m && m.skippedReason) {
+        const decision: HumanFaceScanDecision = {
+          id: entry.item.id,
+          hasHumanFace: false,
+          faceCount: 0,
+          confidence: 0.99,
+          subjectSummary: m.skippedReason,
+          cached: false,
+        };
+        decisionsById.set(entry.item.id, decision);
+        const cacheKey = entry.item.url || entry.item.thumbnailUrl || '';
+        if (shouldUseCache && cacheKey) {
+          setCachedDecision(cacheKey, {
+            hasHumanFace: decision.hasHumanFace,
+            faceCount: decision.faceCount,
+            confidence: decision.confidence,
+            subjectSummary: decision.subjectSummary,
+          });
+        }
+        scannedCount++;
+      } else if (m && !m.skippedReason && m.buffer && m.buffer.byteLength > 0) {
+        readyItems.push({
+          item: entry.item,
+          media: { buffer: m.buffer, mimeType: m.mimeType },
+        });
+      } else {
+        errorCount++;
         decisionsById.set(entry.item.id, {
           id: entry.item.id,
           hasHumanFace: false,
@@ -364,16 +535,23 @@ export async function analyzeImagesForHumanFaces(
 
       let responseText = '';
       let lastGenerateErr: unknown = null;
-      const maxAttempts = deps?.generateContentFn ? 1 : 2;
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const attempts = deps?.generateContentFn
+        ? [{ model: HUMAN_FACE_FILTER_MODEL, thinkingLevel: ThinkingLevel.MINIMAL }]
+        : [
+            { model: HUMAN_FACE_FILTER_MODEL, thinkingLevel: ThinkingLevel.MINIMAL },
+            { model: HUMAN_FACE_FILTER_MODEL, thinkingLevel: ThinkingLevel.MINIMAL },
+            { model: HUMAN_FACE_FILTER_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.LOW },
+          ];
+      for (let attempt = 0; attempt < attempts.length; attempt++) {
+        const currentAttempt = attempts[attempt];
         try {
           const response = await callGenerate({
-            model: HUMAN_FACE_FILTER_MODEL,
+            model: currentAttempt.model,
             contents: { parts },
             config: {
               responseMimeType: 'application/json',
               responseSchema: FACE_SCAN_RESPONSE_SCHEMA,
-              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+              thinkingConfig: { thinkingLevel: currentAttempt.thinkingLevel },
             },
           });
           responseText = (response.text ?? '').trim();
@@ -383,10 +561,10 @@ export async function analyzeImagesForHumanFaces(
           lastGenerateErr = err;
           const mapped = mapGeminiFaceError(err);
           const isTransient = mapped.status === 503 || mapped.status === 429;
-          if (!isTransient || attempt + 1 >= maxAttempts) {
+          if (!isTransient || attempt + 1 >= attempts.length) {
             throw mapped;
           }
-          await new Promise((r) => setTimeout(r, 1200));
+          await new Promise((r) => setTimeout(r, 800));
         }
       }
       if (lastGenerateErr) {
@@ -435,8 +613,9 @@ export async function analyzeImagesForHumanFaces(
         };
 
         decisionsById.set(item.id, decision);
-        if (shouldUseCache) {
-          setCachedDecision(item.url, {
+        const cacheKey = item.url || item.thumbnailUrl || '';
+        if (shouldUseCache && cacheKey) {
+          setCachedDecision(cacheKey, {
             hasHumanFace: decision.hasHumanFace,
             faceCount: decision.faceCount,
             confidence: decision.confidence,
@@ -461,5 +640,6 @@ export async function analyzeImagesForHumanFaces(
     ),
     cachedCount,
     scannedCount,
+    errorCount,
   };
 }

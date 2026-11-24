@@ -148,7 +148,8 @@ export const FullImageLinksModal: React.FC<FullImageLinksModalProps> = ({
       }
       const unscanned = images.filter(
         (img) =>
-          !isBlankOrPlaceholderUrl(img.thumbnailUrl || img.fullUrl) && !faceScanMap?.[img.id]
+          !isBlankOrPlaceholderUrl(img.thumbnailUrl || img.fullUrl) &&
+          (!faceScanMap?.[img.id] || Boolean(faceScanMap?.[img.id]?.error))
       );
       if (unscanned.length > 0 && onScanHumanFaces) {
         void onScanHumanFaces(images).then((ok) => {

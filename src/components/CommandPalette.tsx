@@ -74,8 +74,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     const quickItems: CommandAction[] = [
       {
         id: 'action-sample-nature',
-        label: 'Run Nature Gallery Sample',
-        detail: 'Test subpage crawling & CDN un-shrinking right away',
+        label: 'Run Extraction Gallery Sample',
+        detail: 'Test subpage crawling, CDN un-shrinking & AI face filtering',
         category: 'Quick Actions',
         icon: Sparkles,
         run: () => {
@@ -88,7 +88,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         ? [
             {
               id: 'action-nested-galleries',
-              label: 'Open Nested Multi-Gallery Scraper',
+              label: 'Open Nested Multi-Gallery Crawler',
               detail: 'Crawl a hub webpage containing multiple child gallery URLs',
               category: 'Quick Actions' as const,
               icon: FolderTree,
@@ -114,8 +114,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       },
       {
         id: 'action-theme',
-        label: `Switch to ${theme === 'dark' ? 'Light Paper' : 'Darkroom'} Theme`,
-        detail: 'Toggle workspace visual appearance',
+        label: `Switch to ${theme === 'dark' ? 'Archival Light' : 'Calibrated Dark'} Theme`,
+        detail: 'Toggle Ultimate Image Processing workspace theme',
         category: 'Quick Actions',
         icon: theme === 'dark' ? Sun : Moon,
         run: () => {
@@ -197,15 +197,15 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Quick Studio Command Palette"
+      aria-label="Ultimate Image Processing Command Palette"
       className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-start justify-center pt-[12vh] px-4"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl bg-white dark:bg-[#13151C] border border-[#E4E0D6] dark:border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden animate-fadeIn"
+        className="w-full max-w-xl bg-white dark:bg-[#101218] border border-[#E2DED3] dark:border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden animate-fadeIn"
       >
-        <div className="flex items-center gap-3 px-4 py-3.5 border-b border-[#E4E0D6] dark:border-white/[0.08]">
+        <div className="flex items-center gap-3 px-4 py-3.5 border-b border-[#E2DED3] dark:border-white/[0.08]">
           <Search className="w-4 h-4 text-zinc-400 shrink-0" />
           <input
             ref={inputRef}
@@ -215,7 +215,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               setQuery(e.target.value);
               setSelectedIdx(0);
             }}
-            placeholder="Jump to a studio, run a sample, or switch theme..."
+            placeholder="Jump to a processing studio, run a sample, or switch theme..."
             className="flex-1 bg-transparent text-sm text-[#141413] dark:text-white placeholder-zinc-400 focus:outline-none"
           />
           <button

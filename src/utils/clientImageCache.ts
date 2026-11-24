@@ -162,3 +162,78 @@ export function getClientImageCacheStats(): {
     workingUrls: WORKING_PREVIEW_URLS.size,
   };
 }
+
+/**
+ * Attempts to build a compact (<=512px) JPEG data URL from already-cached browser Blob data
+ * or a readable loaded <img> element so AI face scanning can inspect hotlink/cookie-protected
+ * scraped images even when server egress IP fetching fails.
+ */
+export async function tryCaptureBrowserPreviewDataUrl(params: {
+  id: string;
+  fullUrl?: string;
+  thumbnailUrl?: string;
+  fallbackUrl?: string;
+}): Promise<string | undefined> {
+  if (typeof document === 'undefined' || typeof window === 'undefined') {
+    return undefined;
+  }
+
+  const cachedBlob =
+    (params.thumbnailUrl ? getCachedImageBlob(params.thumbnailUrl) : null) ||
+    (params.fullUrl ? getCachedImageBlob(params.fullUrl) : null) ||
+    (params.fallbackUrl ? getCachedImageBlob(params.fallbackUrl) : null);
+
+  const renderElementToJpeg = (
+    source: CanvasImageSource,
+    srcW: number,
+    srcH: number
+  ): string | undefined => {
+    if (!srcW || !srcH || Math.max(srcW, srcH) < 16) return undefined;
+    const scale = Math.min(1, 512 / Math.max(srcW, srcH));
+    const targetW = Math.max(1, Math.round(srcW * scale));
+    const targetH = Math.max(1, Math.round(srcH * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return undefined;
+    ctx.drawImage(source, 0, 0, targetW, targetH);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
+    return dataUrl.startsWith('data:image/jpeg') ? dataUrl : undefined;
+  };
+
+  if (cachedBlob && cachedBlob.size > 0) {
+    const objectUrl = URL.createObjectURL(cachedBlob);
+    try {
+      const loaded = await new Promise<HTMLImageElement | null>((resolve) => {
+        const imgEl = new Image();
+        imgEl.onload = () => resolve(imgEl);
+        imgEl.onerror = () => resolve(null);
+        imgEl.src = objectUrl;
+      });
+      if (loaded) {
+        return renderElementToJpeg(loaded, loaded.naturalWidth, loaded.naturalHeight);
+      }
+    } catch {
+      return undefined;
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+
+  try {
+    const escapedId =
+      typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+        ? CSS.escape(params.id)
+        : params.id.replace(/"/g, '\\"');
+    const domImg = document.querySelector<HTMLImageElement>(`img[data-face-img-id="${escapedId}"]`);
+    if (domImg && domImg.complete && domImg.naturalWidth > 1 && domImg.naturalHeight > 1) {
+      return renderElementToJpeg(domImg, domImg.naturalWidth, domImg.naturalHeight);
+    }
+  } catch {
+    // Tainted cross-origin canvas or unreadable image element
+    return undefined;
+  }
+
+  return undefined;
+}

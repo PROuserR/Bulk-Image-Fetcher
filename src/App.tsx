@@ -144,6 +144,7 @@ import {
 import { ProgressiveDownloadBar } from './components/ProgressiveDownloadBar';
 import { ArchiveDownloadBar } from './components/ArchiveDownloadBar';
 import { fetchApiJson } from './utils/safeFetchJson';
+import { tryCaptureBrowserPreviewDataUrl } from './utils/clientImageCache';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 
 const PAUSED_DIRECT_STORAGE_KEY = 'fullres_paused_direct_v1';
@@ -672,6 +673,7 @@ export default function App() {
     ) => {
       nestedAbortRef.current?.abort();
       faceScanAbortRef.current?.abort();
+      faceScanMapRef.current = {};
       setFaceScanMap({});
       setFaceScanStatus({ isScanning: false, scanned: 0, total: 0, error: null });
       setNestedDiscovery(null);
@@ -755,6 +757,7 @@ export default function App() {
 
       nestedAbortRef.current?.abort();
       faceScanAbortRef.current?.abort();
+      faceScanMapRef.current = {};
       setFaceScanMap({});
       setFaceScanStatus({ isScanning: false, scanned: 0, total: 0, error: null });
       const abortController = new AbortController();
@@ -1075,6 +1078,7 @@ export default function App() {
   ) => {
     nestedAbortRef.current?.abort();
     faceScanAbortRef.current?.abort();
+    faceScanMapRef.current = {};
     setFaceScanMap({});
     setFaceScanStatus({ isScanning: false, scanned: 0, total: 0, error: null });
     setNestedDiscovery(null);
@@ -1249,6 +1253,16 @@ export default function App() {
       );
 
       if (toScan.length === 0) {
+        const usableCount = targetImages.filter((img) => {
+          const entry = currentMap[img.id];
+          return entry && !entry.error;
+        }).length;
+        if (targetImages.length > 0 && usableCount === 0) {
+          const msg =
+            'No scraped images could be inspected (blank placeholders or unavailable URLs).';
+          setFaceScanStatus({ isScanning: false, scanned: 0, total: 0, error: msg });
+          return false;
+        }
         return true;
       }
 
@@ -1264,54 +1278,63 @@ export default function App() {
         error: null,
       });
 
-      const BATCH_SIZE = 8;
+      const BATCH_SIZE = 10;
       let scannedSoFar = 0;
+      const accumulatedResults: Record<string, FaceScanResult> = { ...currentMap };
+
+      const sendFaceScanChunk = async (
+        chunkItems: Array<{ img: ScrapedImage; previewDataUrl?: string }>
+      ) => {
+        const { ok, data, error } = await fetchApiJson('/api/ai/human-face-filter', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            images: chunkItems.map(({ img, previewDataUrl }) => ({
+              id: img.id,
+              url: img.fullUrl || img.thumbnailUrl || img.fallbackUrl || '',
+              thumbnailUrl: img.thumbnailUrl,
+              fallbackUrl: img.fallbackUrl,
+              linkedPageUrl: img.linkedPageUrl,
+              filename: img.filename,
+              referer: img.galleryUrl || sourceUrl || undefined,
+              previewDataUrl,
+            })),
+            referer: sourceUrl || undefined,
+            relayUrl: relayUrl.trim() || undefined,
+          }),
+          signal: abortController.signal,
+        });
+
+        if (abortController.signal.aborted) return false;
+
+        if (!ok || !data || !Array.isArray(data.results)) {
+          throw new Error(data?.error || error || 'AI face detection failed.');
+        }
+
+        for (const row of data.results as Array<FaceScanResult & { id: string }>) {
+          if (row && typeof row.id === 'string') {
+            accumulatedResults[row.id] = {
+              hasHumanFace: Boolean(row.hasHumanFace),
+              faceCount: Number(row.faceCount || 0),
+              confidence: Number(row.confidence || 0),
+              subjectSummary: String(row.subjectSummary || ''),
+              error: row.error,
+            };
+          }
+        }
+        const snapshot = { ...accumulatedResults };
+        faceScanMapRef.current = snapshot;
+        setFaceScanMap(snapshot);
+
+        return true;
+      };
 
       try {
         for (let i = 0; i < toScan.length; i += BATCH_SIZE) {
           if (abortController.signal.aborted) return false;
           const chunk = toScan.slice(i, i + BATCH_SIZE);
-
-          const { ok, data, error } = await fetchApiJson('/api/ai/human-face-filter', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              images: chunk.map((img) => ({
-                id: img.id,
-                url: img.fullUrl,
-                thumbnailUrl: img.thumbnailUrl,
-                fallbackUrl: img.fallbackUrl,
-                linkedPageUrl: img.linkedPageUrl,
-                filename: img.filename,
-              })),
-              referer: sourceUrl || undefined,
-              relayUrl: relayUrl.trim() || undefined,
-            }),
-            signal: abortController.signal,
-          });
-
-          if (abortController.signal.aborted) return false;
-
-          if (!ok || !data || !Array.isArray(data.results)) {
-            throw new Error(data?.error || error || 'AI face detection failed.');
-          }
-
-          setFaceScanMap((prev) => {
-            const next = { ...prev };
-            for (const row of data.results as FaceScanResult[] & Array<{ id: string }>) {
-              if (row && typeof row.id === 'string') {
-                next[row.id] = {
-                  hasHumanFace: Boolean(row.hasHumanFace),
-                  faceCount: Number(row.faceCount || 0),
-                  confidence: Number(row.confidence || 0),
-                  subjectSummary: String(row.subjectSummary || ''),
-                  error: row.error,
-                };
-              }
-            }
-            faceScanMapRef.current = next;
-            return next;
-          });
+          const continued = await sendFaceScanChunk(chunk.map((img) => ({ img })));
+          if (!continued || abortController.signal.aborted) return false;
 
           scannedSoFar += chunk.length;
           setFaceScanStatus({
@@ -1322,19 +1345,74 @@ export default function App() {
           });
         }
 
+        // Fallback: if any scraped images failed server-side download (hotlink/cookie/IP lock),
+        // extract compact previews from already-loaded browser cache/DOM and retry just those items.
+        const failedFetchItems = toScan.filter((img) => Boolean(accumulatedResults[img.id]?.error));
+        if (failedFetchItems.length > 0 && !abortController.signal.aborted) {
+          const browserFallbackEntries = await Promise.all(
+            failedFetchItems.map(async (img) => ({
+              img,
+              previewDataUrl: await tryCaptureBrowserPreviewDataUrl(img),
+            }))
+          );
+          const recoverable = browserFallbackEntries.filter(
+            (entry): entry is { img: ScrapedImage; previewDataUrl: string } =>
+              Boolean(entry.previewDataUrl)
+          );
+          for (let i = 0; i < recoverable.length; i += BATCH_SIZE) {
+            if (abortController.signal.aborted) return false;
+            const retryChunk = recoverable.slice(i, i + BATCH_SIZE);
+            await sendFaceScanChunk(retryChunk);
+          }
+        }
+
         if (faceScanAbortRef.current === abortController) {
           faceScanAbortRef.current = null;
         }
+
+        const inspectedOkCount = targetImages.filter(
+          (img) => accumulatedResults[img.id] && !accumulatedResults[img.id].error
+        ).length;
+        const fetchErrorCount = targetImages.filter((img) =>
+          Boolean(accumulatedResults[img.id]?.error)
+        ).length;
+
+        if (inspectedOkCount === 0 && fetchErrorCount > 0) {
+          const blockMsg =
+            'Could not download the scraped images on the server to run AI face filtering (remote host blocked access or images failed to decode). Try using a Relay URL or Open-Tab Harvester.';
+          setFaceScanStatus({
+            isScanning: false,
+            scanned: toScan.length,
+            total: toScan.length,
+            error: blockMsg,
+          });
+          setErrorMessage(blockMsg);
+          return false;
+        }
+
+        const partialWarning =
+          fetchErrorCount > 0
+            ? `${fetchErrorCount} scraped image${fetchErrorCount === 1 ? '' : 's'} could not be fetched for AI inspection and ${fetchErrorCount === 1 ? 'was' : 'were'} excluded.`
+            : null;
+
         setFaceScanStatus({
           isScanning: false,
           scanned: toScan.length,
           total: toScan.length,
-          error: null,
+          error: partialWarning,
         });
 
-        const merged = faceScanMapRef.current;
-        const matchedFaces = targetImages.filter((img) => merged[img.id]?.hasHumanFace).length;
-        const excludedCount = targetImages.filter((img) => merged[img.id] && !merged[img.id].hasHumanFace).length;
+        const matchedFaces = targetImages.filter(
+          (img) =>
+            accumulatedResults[img.id] &&
+            !accumulatedResults[img.id].error &&
+            accumulatedResults[img.id].hasHumanFace
+        ).length;
+        const excludedCount = targetImages.filter(
+          (img) =>
+            accumulatedResults[img.id] &&
+            (!accumulatedResults[img.id].hasHumanFace || Boolean(accumulatedResults[img.id].error))
+        ).length;
         showToast(
           `AI face filter complete: kept ${matchedFaces} with human faces, excluded ${excludedCount} without faces.`
         );
@@ -1803,6 +1881,7 @@ export default function App() {
                   requestedMode={requestedMode}
                   onModeHandled={() => setRequestedMode(null)}
                   compactHeader={images.length > 0 || Boolean(nestedDiscovery)}
+                  onSelectTab={handleSelectTab}
                 />
 
                 {nestedDiscovery && nestedDiscovery.galleries.length > 0 && (
@@ -2066,14 +2145,14 @@ export default function App() {
             />
           )}
 
-          <footer className="mt-auto border-t border-[#E4E0D6] dark:border-white/[0.08] py-4 px-4 sm:px-6 lg:px-8 bg-[#FBFBF9] dark:bg-[#0D0F14] transition-colors">
+          <footer className="mt-auto border-t border-[#E2DED3] dark:border-white/[0.08] py-4 px-4 sm:px-6 lg:px-8 bg-[#FAF9F5]/95 dark:bg-[#0B0D12]/95 transition-colors">
             <div className="max-w-[1440px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
               <div className="flex items-center gap-2">
                 <span className="font-display font-semibold text-[#141413] dark:text-zinc-200">
-                  FullRes
+                  Ultimate Image Processing
                 </span>
                 <span aria-hidden="true">·</span>
-                <span>High-Resolution Image Extractor &amp; Post-Production Suite</span>
+                <span>Capture, AI Vision, Color Grading &amp; Post-Production Suite</span>
               </div>
               <div className="font-mono text-[11px]">
                 Press ⌘K to switch studios or launch actions

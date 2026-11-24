@@ -24,13 +24,19 @@ import {
   ArrowRight,
   ArrowUpRight,
   FolderTree,
+  Wand2,
+  Crop,
+  Film,
+  Sparkles,
+  ScanFace,
 } from 'lucide-react';
-import heroDarkroomImg from '../assets/images/studio_hero_darkroom_1795110056551.jpg';
+import ultimateHeroImg from '../assets/images/ultimate_hero_studio_1795515690881.jpg';
 import { SAMPLE_PRESETS, NESTED_HUB_PRESET } from '../utils/samplePages';
 import {
   OPEN_TAB_HARVESTER_SCRIPT,
   INSTAGRAM_PROFILE_HARVESTER_SCRIPT,
 } from '../utils/harvesterScripts';
+import type { WorkspaceTabId } from './Header';
 
 export type ExtractorMode = 'url' | 'nested' | 'instagram' | 'harvester' | 'paste';
 
@@ -71,6 +77,7 @@ interface ScraperControlsProps {
   requestedMode?: ExtractorMode | null;
   onModeHandled?: () => void;
   compactHeader?: boolean;
+  onSelectTab?: (tab: WorkspaceTabId) => void;
 }
 
 export const ScraperControls: React.FC<ScraperControlsProps> = ({
@@ -92,6 +99,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
   requestedMode = null,
   onModeHandled,
   compactHeader = false,
+  onSelectTab,
 }) => {
   const [mode, setMode] = useState<ExtractorMode>('url');
   const [url, setUrl] = useState(currentUrl);
@@ -233,36 +241,90 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
       <div
         className={`${
           compactHeader ? 'lg:col-span-12' : 'lg:col-span-7 xl:col-span-8'
-        } bg-white dark:bg-[#111319] border border-[#E4E0D6] dark:border-white/[0.08] rounded-2xl p-6 sm:p-8 flex flex-col justify-between transition-colors`}
+        } bg-white dark:bg-[#101218] border border-[#E2DED3] dark:border-white/[0.08] rounded-2xl p-6 sm:p-8 flex flex-col justify-between transition-colors`}
       >
         <div>
           {!compactHeader ? (
             <div className="mb-6">
               <div className="text-xs font-mono text-zinc-500 dark:text-zinc-400 flex flex-wrap items-center gap-x-2 gap-y-1 mb-2.5">
-                <span className="whitespace-nowrap">Full-Resolution Capture</span>
-                <span aria-hidden="true">/</span>
-                <span className="whitespace-nowrap">Zero-Compromise Studio</span>
+                <span className="font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                  Ultimate Image Processing
+                </span>
+                <span aria-hidden="true">·</span>
+                <span className="whitespace-nowrap">Capture, AI Vision &amp; Grading Workbench</span>
               </div>
               <h1 className="font-display text-3xl sm:text-4xl lg:text-[42px] font-bold text-[#141413] dark:text-[#F5F4F0] tracking-[-0.03em] leading-[1.08] [text-wrap:balance]">
-                Recover every full-resolution original, effortlessly.
+                The complete workbench for full-res capture &amp; AI image processing.
               </h1>
               <p className="text-sm sm:text-[15px] text-zinc-600 dark:text-zinc-400 leading-relaxed mt-3 max-w-2xl">
-                Un-shrinks CDN thumbnails, follows linked detail subpages, expands Instagram carousels, and feeds straight into local grading, GIF synthesis, and vision AI.
+                Recover un-shrunk web &amp; Instagram originals, isolate portraits with{' '}
+                <span className="font-medium text-[#141413] dark:text-zinc-200">
+                  Only Person · Exclude Landscape (AI)
+                </span>
+                , and pipe straight into non-destructive grading, crop/resize, GIF89a synthesis, and Gemma 4.
               </p>
+
+              {onSelectTab && (
+                <div className="mt-4 pt-4 border-t border-[#E2DED3]/75 dark:border-white/[0.06] flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="font-mono text-[11px] text-zinc-400 dark:text-zinc-500 mr-1 whitespace-nowrap">
+                    Studios:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTab('filters')}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F5F4EF] dark:bg-white/[0.05] hover:bg-[#EAE7DD] dark:hover:bg-white/[0.1] border border-[#E2DED3] dark:border-white/[0.08] text-[#141413] dark:text-zinc-200 font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Wand2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>Filter &amp; Lenses</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTab('crop')}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F5F4EF] dark:bg-white/[0.05] hover:bg-[#EAE7DD] dark:hover:bg-white/[0.1] border border-[#E2DED3] dark:border-white/[0.08] text-[#141413] dark:text-zinc-200 font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Crop className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>Crop &amp; Resize</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTab('gif')}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F5F4EF] dark:bg-white/[0.05] hover:bg-[#EAE7DD] dark:hover:bg-white/[0.1] border border-[#E2DED3] dark:border-white/[0.08] text-[#141413] dark:text-zinc-200 font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Film className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>GIF89a</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTab('classifier')}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F5F4EF] dark:bg-white/[0.05] hover:bg-[#EAE7DD] dark:hover:bg-white/[0.1] border border-[#E2DED3] dark:border-white/[0.08] text-[#141413] dark:text-zinc-200 font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <ScanFace className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>Face Sort</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTab('gemma')}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F5F4EF] dark:bg-white/[0.05] hover:bg-[#EAE7DD] dark:hover:bg-white/[0.1] border border-[#E2DED3] dark:border-white/[0.08] text-[#141413] dark:text-zinc-200 font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>Gemma 4</span>
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
               <h1 className="font-display text-xl font-bold text-[#141413] dark:text-[#F5F4F0] tracking-tight">
-                Extract Full-Resolution Sources
+                Capture &amp; Process Full-Resolution Sources
               </h1>
             </div>
           )}
 
-          {/* 4-Mode Clean Segmented Switcher */}
+          {/* 5-Mode Clean Segmented Switcher */}
           <div
             role="tablist"
             aria-label="Extraction Source Mode"
-            className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1 p-1 bg-[#F2EFE8] dark:bg-[#0A0B0E] border border-[#E4E0D6] dark:border-white/[0.08] rounded-xl w-full sm:w-fit max-w-full mb-4"
+            className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1 p-1 bg-[#F2EFE8] dark:bg-[#08090C] border border-[#E2DED3] dark:border-white/[0.08] rounded-xl w-full sm:w-fit max-w-full mb-4"
           >
             <button
               type="button"
@@ -270,7 +332,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               aria-selected={mode === 'url'}
               onClick={() => setMode('url')}
               onKeyDown={handleModeTabKeyDown}
-              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'url'
                   ? 'bg-white dark:bg-[#191C25] text-[#141413] dark:text-white shadow-xs'
                   : 'text-zinc-600 dark:text-zinc-400 hover:text-[#141413] dark:hover:text-zinc-200'
@@ -286,7 +348,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               aria-selected={mode === 'nested'}
               onClick={() => setMode('nested')}
               onKeyDown={handleModeTabKeyDown}
-              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'nested'
                   ? 'bg-white dark:bg-[#191C25] text-[#141413] dark:text-white shadow-xs'
                   : 'text-zinc-600 dark:text-zinc-400 hover:text-[#141413] dark:hover:text-zinc-200'
@@ -302,7 +364,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               aria-selected={mode === 'instagram'}
               onClick={() => setMode('instagram')}
               onKeyDown={handleModeTabKeyDown}
-              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'instagram'
                   ? 'bg-white dark:bg-[#191C25] text-[#141413] dark:text-white shadow-xs'
                   : instagramLoginRequired
@@ -320,7 +382,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               aria-selected={mode === 'harvester'}
               onClick={() => setMode('harvester')}
               onKeyDown={handleModeTabKeyDown}
-              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'harvester'
                   ? 'bg-white dark:bg-[#191C25] text-[#141413] dark:text-white shadow-xs'
                   : geoBlocked
@@ -338,14 +400,14 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               aria-selected={mode === 'paste'}
               onClick={() => setMode('paste')}
               onKeyDown={handleModeTabKeyDown}
-              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'paste'
                   ? 'bg-white dark:bg-[#191C25] text-[#141413] dark:text-white shadow-xs'
                   : 'text-zinc-600 dark:text-zinc-400 hover:text-[#141413] dark:hover:text-zinc-200'
               }`}
             >
               <Code className="w-3.5 h-3.5 shrink-0" />
-              <span>Paste HTML / JSON</span>
+              <span>Paste HTML</span>
             </button>
           </div>
         </div>
@@ -824,39 +886,51 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
         </form>
       </div>
 
-      {/* Right Column: Editorial Darkroom Visual Card (shown on empty state / landing hero) */}
+      {/* Right Column: Optical Studio Hero Card (shown on empty state / landing hero) */}
       {!compactHeader && (
-        <aside className="lg:col-span-5 xl:col-span-4 relative rounded-2xl overflow-hidden border border-[#E4E0D6] dark:border-white/[0.08] bg-[#141413] min-h-[260px] flex flex-col justify-end group">
+        <aside className="lg:col-span-5 xl:col-span-4 relative rounded-2xl overflow-hidden border border-[#E2DED3] dark:border-white/[0.08] bg-[#141413] min-h-[280px] flex flex-col justify-end group">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={heroDarkroomImg.src}
-            alt="Medium format lens, optical loupe, and fine-art black and white contact prints"
+            src={ultimateHeroImg.src}
+            alt="Precision cinema lens, brass aperture ring, optical loupe, and portrait contact prints"
             className="absolute inset-0 w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-500 ease-out"
           />
           <div
             aria-hidden="true"
-            className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-black/10"
+            className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/10"
           />
 
           <div className="relative z-10 p-5 sm:p-6 text-white space-y-3">
             <div className="flex items-center gap-2 text-[11px] font-mono text-zinc-300">
-              <span>Un-shrink Engine</span>
+              <span>Optical Pipeline</span>
               <span aria-hidden="true">·</span>
-              <span>Contact Sheet</span>
+              <span>AI Vision Ready</span>
             </div>
             <h2 className="font-display text-lg sm:text-xl font-bold leading-snug text-white [text-wrap:balance]">
-              Inspect every source pixel before downloading.
+              Inspect, filter faces with AI, and process every pixel.
             </h2>
-            {firstSample && (
-              <button
-                type="button"
-                onClick={() => handleSelectPreset(firstSample.url, firstSample.html)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white text-[#141413] hover:bg-zinc-100 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-              >
-                <span>Run Nature Sample</span>
-                <ArrowUpRight className="w-3.5 h-3.5" />
-              </button>
-            )}
+            <div className="flex flex-wrap items-center gap-2 pt-0.5">
+              {firstSample && (
+                <button
+                  type="button"
+                  onClick={() => handleSelectPreset(firstSample.url, firstSample.html)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white text-[#141413] hover:bg-zinc-100 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <span>Run Nature Sample</span>
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {onSelectTab && (
+                <button
+                  type="button"
+                  onClick={() => onSelectTab('filters')}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-white/15 hover:bg-white/25 backdrop-blur-sm border border-white/20 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Wand2 className="w-3.5 h-3.5" />
+                  <span>Filter Studio</span>
+                </button>
+              )}
+            </div>
           </div>
         </aside>
       )}

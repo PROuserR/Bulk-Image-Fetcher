@@ -172,10 +172,10 @@ const GalleryCard: React.FC<GalleryCardProps> = React.memo(({
   return (
     <article
       onClick={() => onSelectImage(img)}
-      className={`group bg-white dark:bg-[#111319] border rounded-xl overflow-hidden transition-all duration-150 flex flex-col cursor-pointer ${
+      className={`group bg-white dark:bg-[#101218] border rounded-xl overflow-hidden transition-all duration-150 flex flex-col cursor-pointer ${
         isSelected
           ? 'border-blue-600 ring-2 ring-blue-600/20 shadow-sm'
-          : 'border-[#E4E0D6] dark:border-white/[0.08] hover:border-zinc-400 dark:hover:border-white/25 hover:-translate-y-0.5'
+          : 'border-[#E2DED3] dark:border-white/[0.08] hover:border-zinc-400 dark:hover:border-white/25 hover:-translate-y-0.5'
       }`}
     >
       {/* Thumbnail Viewport */}
@@ -190,6 +190,7 @@ const GalleryCard: React.FC<GalleryCardProps> = React.memo(({
 
         {!isBroken && activeSrc ? (
           <img
+            data-face-img-id={img.id}
             src={activeSrc}
             alt={img.altText}
             loading={cardIndex < 12 ? 'eager' : 'lazy'}
@@ -469,6 +470,17 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   }, [images]);
 
   useEffect(() => {
+    if (
+      filters.onlyHumanFaces &&
+      !faceScanStatus?.isScanning &&
+      images.length > 0 &&
+      Object.keys(faceScanMap || {}).length === 0
+    ) {
+      setFilters((prev) => (prev.onlyHumanFaces ? { ...prev, onlyHumanFaces: false } : prev));
+    }
+  }, [filters.onlyHumanFaces, faceScanStatus?.isScanning, images.length, faceScanMap]);
+
+  useEffect(() => {
     if (!filters.onlyHumanFaces || !faceScanMap) return;
     setSelectedIds((prev) => {
       if (prev.size === 0) return prev;
@@ -485,6 +497,14 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
       return changed ? next : prev;
     });
   }, [filters.onlyHumanFaces, faceScanMap]);
+
+  const unscannedPendingCount = useMemo(() => {
+    if (!filters.onlyHumanFaces) return 0;
+    return images.filter(
+      (img) =>
+        !isBlankOrPlaceholderUrl(img.thumbnailUrl || img.fullUrl) && !faceScanMap?.[img.id]
+    ).length;
+  }, [filters.onlyHumanFaces, images, faceScanMap]);
 
   const handlePreviewUpdate = useCallback((id: string, info: PreviewStateInfo) => {
     setPreviewMap((prev) => {
@@ -688,7 +708,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   return (
     <div className="space-y-5">
       {/* Gallery Header & Filter Workbench */}
-      <section className="bg-white dark:bg-[#111319] border border-[#E4E0D6] dark:border-white/[0.08] rounded-2xl p-5 sm:p-6 transition-colors">
+      <section className="bg-white dark:bg-[#101218] border border-[#E2DED3] dark:border-white/[0.08] rounded-2xl p-5 sm:p-6 transition-colors">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="min-w-0">
             <h2 className="font-display text-xl sm:text-2xl font-bold text-zinc-950 dark:text-white truncate max-w-2xl">
@@ -861,6 +881,23 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             </div>
           )}
 
+          {unscannedPendingCount > 0 && onScanHumanFaces && !faceScanStatus?.isScanning && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-950/35 border border-blue-200 dark:border-blue-800/70 text-blue-800 dark:text-blue-200 text-xs">
+              <span>
+                {unscannedPendingCount} newly added scraped image
+                {unscannedPendingCount === 1 ? ' is' : 's are'} hidden until inspected by AI face detection.
+              </span>
+              <button
+                type="button"
+                onClick={() => void onScanHumanFaces(images)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors cursor-pointer"
+              >
+                <ScanFace className="w-3.5 h-3.5" />
+                <span>Scan New (+{unscannedPendingCount})</span>
+              </button>
+            </div>
+          )}
+
           <div className="pt-2.5 border-t border-zinc-100 dark:border-zinc-800/60 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3 flex-wrap">
               <label className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400">
@@ -941,7 +978,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
       </section>
 
       {/* Batch Action Toolbar */}
-      <section className="bg-white dark:bg-[#111319] border border-[#E4E0D6] dark:border-white/[0.08] rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 transition-colors">
+      <section className="bg-white dark:bg-[#101218] border border-[#E2DED3] dark:border-white/[0.08] rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 transition-colors">
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"

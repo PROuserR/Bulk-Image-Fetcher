@@ -27,9 +27,9 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
-const SITE_TITLE = 'FullRes — High-Resolution Image Extractor & Studio';
+const SITE_TITLE = 'Ultimate Image Processing — Capture, AI Vision & Grading Suite';
 const SITE_DESCRIPTION =
-  'Extract full-size source images from any webpage or Instagram profile with intelligent CDN un-shrinking, contact-sheet inspector, progressive direct save, directory crop & resize, and batch ZIP export.';
+  'Ultimate Image Processing studio: full-resolution web & Instagram extraction, AI human-face filtering, non-destructive color grading & lenses, batch crop/resize, GIF89a synthesis, and Gemma 4 vision.';
 
 export const metadata: Metadata = {
   title: SITE_TITLE,

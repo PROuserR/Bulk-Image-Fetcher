@@ -29,21 +29,21 @@ interface HeaderProps {
 }
 
 const TAB_LABELS: Record<WorkspaceTabId, string> = {
-  scraper: 'Scraper Studio',
+  scraper: 'Capture Studio',
   crop: 'Crop & Resize',
-  filters: 'Filter Studio',
-  gif: 'GIF Maker',
-  classifier: 'Human Classifier',
-  gemma: 'Gemma 4 AI',
-  docs: 'Setup & Deployment',
+  filters: 'Filter & Lenses',
+  gif: 'GIF89a Motion',
+  classifier: 'Face & ID Sort',
+  gemma: 'Gemma 4 Vision',
+  docs: 'Setup & Runtime',
 };
 
 const MOBILE_TABS: { id: WorkspaceTabId; label: string }[] = [
-  { id: 'scraper', label: 'Scraper' },
+  { id: 'scraper', label: 'Capture' },
   { id: 'crop', label: 'Crop' },
   { id: 'filters', label: 'Filters' },
-  { id: 'gif', label: 'GIF Maker' },
-  { id: 'classifier', label: 'Classifier' },
+  { id: 'gif', label: 'GIF89a' },
+  { id: 'classifier', label: 'Face Sort' },
   { id: 'gemma', label: 'Gemma 4' },
   { id: 'docs', label: 'Setup' },
 ];
@@ -59,7 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
   isExportingZip,
 }) => {
   return (
-    <header className="sticky top-0 z-40 bg-[#FBFBF9]/90 dark:bg-[#0D0F14]/90 backdrop-blur-md border-b border-[#E4E0D6] dark:border-white/[0.08] transition-colors">
+    <header className="sticky top-0 z-40 bg-[#FAF9F5]/90 dark:bg-[#0B0D12]/90 backdrop-blur-md border-b border-[#E2DED3] dark:border-white/[0.08] transition-colors">
       <div className="px-4 sm:px-6 lg:px-8 h-13 md:h-14 flex items-center justify-between gap-4">
         {/* Left: Mobile Brand OR Desktop Contextual Studio Breadcrumb */}
         <div className="flex items-center gap-3 min-w-0">
@@ -67,12 +67,12 @@ export const Header: React.FC<HeaderProps> = ({
             type="button"
             onClick={() => onSelectTab('scraper')}
             className="md:hidden flex items-center gap-2 text-[#141413] dark:text-[#F5F4F0] font-display font-bold text-base tracking-tight whitespace-nowrap shrink-0 cursor-pointer"
-            aria-label="FullRes Scraper Home"
+            aria-label="Ultimate Image Processing Home"
           >
-            <span className="w-6 h-6 rounded-md bg-blue-600 text-white flex items-center justify-center shrink-0">
+            <span className="w-6 h-6 rounded-md bg-[#141413] dark:bg-blue-600 text-white flex items-center justify-center shrink-0">
               <Aperture className="w-3.5 h-3.5" />
             </span>
-            <span>FullRes</span>
+            <span>Ultimate</span>
           </button>
 
           <nav
@@ -84,7 +84,7 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => onSelectTab('scraper')}
               className="text-zinc-500 dark:text-zinc-400 hover:text-[#141413] dark:hover:text-white font-medium transition-colors whitespace-nowrap cursor-pointer"
             >
-              Workstation
+              Ultimate Image Processing
             </button>
             <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
             <span className="font-display font-semibold text-[#141413] dark:text-white truncate">
@@ -99,7 +99,7 @@ export const Header: React.FC<HeaderProps> = ({
             type="button"
             onClick={onOpenCommandPalette}
             aria-label="Open quick studio switcher"
-            className="md:hidden flex items-center gap-1 px-2.5 h-9 rounded-lg border border-[#E4E0D6] dark:border-white/[0.1] bg-white dark:bg-[#151821] text-xs font-medium text-zinc-700 dark:text-zinc-200 cursor-pointer"
+            className="md:hidden flex items-center gap-1 px-2.5 h-9 rounded-lg border border-[#E2DED3] dark:border-white/[0.1] bg-white dark:bg-[#151821] text-xs font-medium text-zinc-700 dark:text-zinc-200 cursor-pointer"
           >
             <Command className="w-3.5 h-3.5" />
             <span>Menu</span>
@@ -108,7 +108,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={onToggleTheme}
-            className="w-9 h-9 flex items-center justify-center text-zinc-600 hover:text-[#141413] dark:text-zinc-400 dark:hover:text-white rounded-lg border border-[#E4E0D6] dark:border-white/[0.1] bg-white dark:bg-[#151821] hover:bg-[#EFECE4] dark:hover:bg-white/[0.08] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 cursor-pointer"
+            className="w-9 h-9 flex items-center justify-center text-zinc-600 hover:text-[#141413] dark:text-zinc-400 dark:hover:text-white rounded-lg border border-[#E2DED3] dark:border-white/[0.1] bg-white dark:bg-[#151821] hover:bg-[#EFECE4] dark:hover:bg-white/[0.08] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 cursor-pointer"
             aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
           >
             {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -139,7 +139,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div
         role="tablist"
         aria-label="Mobile Workspace Tabs"
-        className="md:hidden border-t border-[#E4E0D6]/80 dark:border-white/[0.06] px-4 flex items-center gap-4 overflow-x-auto text-xs font-medium h-10"
+        className="md:hidden border-t border-[#E2DED3]/80 dark:border-white/[0.06] px-4 flex items-center gap-4 overflow-x-auto text-xs font-medium h-10"
       >
         {MOBILE_TABS.map((tab) => {
           const isActive = activeTab === tab.id;
