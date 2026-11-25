@@ -23,19 +23,15 @@
 }
 
 .studio-canvas-bg {
-  background-color: #F4F3EE;
-  background-image:
-    linear-gradient(to right, rgba(20, 20, 19, 0.032) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(20, 20, 19, 0.032) 1px, transparent 1px);
-  background-size: 32px 32px;
+  background-color: #F4F6F9;
+  background-image: radial-gradient(rgba(15, 20, 31, 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
 .dark .studio-canvas-bg {
-  background-color: #08090C;
-  background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
-  background-size: 32px 32px;
+  background-color: #07090E;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.065) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
 @keyframes panelFadeSlide {

@@ -67,19 +67,19 @@ export const NestedGalleryQueue: React.FC<NestedGalleryQueueProps> = ({
   return (
     <section
       aria-label="Discovered child galleries"
-      className="bg-white dark:bg-[#111319] border border-[#E4E0D6] dark:border-white/[0.08] rounded-2xl overflow-hidden transition-colors"
+      className="bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] rounded-2xl overflow-hidden transition-colors"
     >
       {/* Header Row */}
-      <div className="px-5 py-4 border-b border-[#E4E0D6] dark:border-white/[0.08] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="px-5 py-4 border-b border-[#DCE1EB] dark:border-white/[0.08] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <FolderTree className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-            <h2 className="font-display text-sm sm:text-base font-bold text-[#141413] dark:text-white truncate">
+            <h2 className="font-display text-sm sm:text-base font-bold text-[#0F141F] dark:text-[#F3F6FA] truncate">
               Discovered Child Galleries
             </h2>
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 truncate tabular-nums">
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate tabular-nums">
+            <span className="font-medium text-slate-700 dark:text-slate-300">
               {galleries.length} galleries found
             </span>
             <span aria-hidden="true">·</span>
@@ -96,12 +96,12 @@ export const NestedGalleryQueue: React.FC<NestedGalleryQueueProps> = ({
             type="button"
             disabled={crawlProgress.isCrawling}
             onClick={onSelectAll}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#F6F5F1] dark:bg-white/[0.06] hover:bg-[#ECE8DE] dark:hover:bg-white/[0.1] border border-[#E4E0D6] dark:border-white/[0.08] rounded-lg text-xs font-medium text-[#141413] dark:text-zinc-200 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#F4F6F9] dark:bg-white/[0.06] hover:bg-[#E2E7F0] dark:hover:bg-white/[0.1] border border-[#DCE1EB] dark:border-white/[0.08] rounded-lg text-xs font-medium text-[#0F141F] dark:text-slate-200 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
           >
             {isAllSelected ? (
               <CheckSquare className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
             ) : (
-              <Square className="w-3.5 h-3.5 text-zinc-400" />
+              <Square className="w-3.5 h-3.5 text-slate-400" />
             )}
             <span>{isAllSelected ? 'Deselect All' : 'Select All'}</span>
           </button>
@@ -132,7 +132,7 @@ export const NestedGalleryQueue: React.FC<NestedGalleryQueueProps> = ({
               type="button"
               onClick={onClear}
               aria-label="Clear discovered galleries queue"
-              className="p-1.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 rounded-lg hover:bg-[#F2EFE8] dark:hover:bg-white/[0.06] transition-colors cursor-pointer"
+              className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-[#EEF1F6] dark:hover:bg-white/[0.06] transition-colors cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -142,9 +142,9 @@ export const NestedGalleryQueue: React.FC<NestedGalleryQueueProps> = ({
 
       {/* Live Crawl Progress Bar */}
       {(crawlProgress.isCrawling || crawlProgress.completedCount > 0) && (
-        <div className="px-5 py-2.5 bg-[#F6F5F1] dark:bg-[#0B0C10] border-b border-[#E4E0D6] dark:border-white/[0.06]">
+        <div className="px-5 py-2.5 bg-[#F4F6F9] dark:bg-[#090C12] border-b border-[#DCE1EB] dark:border-white/[0.06]">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs mb-1.5">
-            <div className="flex items-center gap-2 font-medium text-[#141413] dark:text-zinc-200 min-w-0">
+            <div className="flex items-center gap-2 font-medium text-[#0F141F] dark:text-slate-200 min-w-0">
               {crawlProgress.isCrawling ? (
                 <Loader2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 animate-spin shrink-0" />
               ) : (
@@ -156,12 +156,12 @@ export const NestedGalleryQueue: React.FC<NestedGalleryQueueProps> = ({
                   : 'Nested multi-gallery crawl finished'}
               </span>
             </div>
-            <span className="font-mono text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400 shrink-0">
+            <span className="font-mono text-[11px] tabular-nums text-slate-500 dark:text-slate-400 shrink-0">
               {crawlProgress.completedCount} / {crawlProgress.totalCount} galleries ·{' '}
               {crawlProgress.extractedImagesCount} photos
             </span>
           </div>
-          <div className="h-1 w-full bg-[#E4E0D6] dark:bg-white/[0.08] rounded-full overflow-hidden">
+          <div className="h-1 w-full bg-[#DCE1EB] dark:bg-white/[0.08] rounded-full overflow-hidden">
             <div
               className="h-full bg-blue-600 origin-left transition-transform duration-200"
               style={{ transform: `scaleX(${pct})` }}
@@ -171,7 +171,7 @@ export const NestedGalleryQueue: React.FC<NestedGalleryQueueProps> = ({
       )}
 
       {/* Gallery Queue List */}
-      <div className="max-h-[320px] overflow-y-auto divide-y divide-[#EFECE4] dark:divide-white/[0.06]">
+      <div className="max-h-[320px] overflow-y-auto divide-y divide-[#DCE1EB] dark:divide-white/[0.06]">
         {galleries.map((gal, idx) => {
           const isChecked = selectedIds.has(gal.id);
           const itemStatus = crawlProgress.statusById[gal.id];
@@ -181,8 +181,8 @@ export const NestedGalleryQueue: React.FC<NestedGalleryQueueProps> = ({
               key={gal.id}
               className={`px-5 py-2.5 flex items-center justify-between gap-3 transition-colors ${
                 isChecked
-                  ? 'bg-white dark:bg-[#111319] hover:bg-[#F9F8F5] dark:hover:bg-white/[0.03]'
-                  : 'bg-[#FAF9F6] dark:bg-[#0D0F14] opacity-70'
+                  ? 'bg-white dark:bg-[#0E121B] hover:bg-[#F4F6F9] dark:hover:bg-white/[0.03]'
+                  : 'bg-[#F4F6F9] dark:bg-[#090C12] opacity-70'
               }`}
             >
               <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -192,14 +192,14 @@ export const NestedGalleryQueue: React.FC<NestedGalleryQueueProps> = ({
                   disabled={crawlProgress.isCrawling}
                   onChange={() => onToggleSelect(gal.id)}
                   aria-label={`Select gallery ${gal.title}`}
-                  className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 accent-blue-600 shrink-0 cursor-pointer"
+                  className="w-4 h-4 rounded border-slate-300 dark:border-slate-700 accent-blue-600 shrink-0 cursor-pointer"
                 />
 
-                <span className="font-mono text-[11px] tabular-nums text-zinc-400 w-6 shrink-0">
+                <span className="font-mono text-[11px] tabular-nums text-slate-400 w-6 shrink-0">
                   {String(idx + 1).padStart(2, '0')}
                 </span>
 
-                <div className="w-11 h-8 rounded-md bg-[#EFECE4] dark:bg-[#090A0E] border border-[#E4E0D6] dark:border-white/[0.06] overflow-hidden flex items-center justify-center shrink-0">
+                <div className="w-11 h-8 rounded-md bg-[#EEF1F6] dark:bg-[#090C12] border border-[#DCE1EB] dark:border-white/[0.06] overflow-hidden flex items-center justify-center shrink-0">
                   {gal.coverThumbnailUrl ? (
                     /* eslint-disable-next-line @next/next/no-img-element */
                     <img
@@ -212,20 +212,20 @@ export const NestedGalleryQueue: React.FC<NestedGalleryQueueProps> = ({
                       }}
                     />
                   ) : (
-                    <ImageOff className="w-3.5 h-3.5 text-zinc-400" />
+                    <ImageOff className="w-3.5 h-3.5 text-slate-400" />
                   )}
                 </div>
 
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 min-w-0">
                     <span
-                      className="text-xs font-semibold text-[#141413] dark:text-zinc-100 truncate"
+                      className="text-xs font-semibold text-[#0F141F] dark:text-slate-100 truncate"
                       title={gal.title}
                     >
                       {gal.title}
                     </span>
                     {gal.photoCountHint && (
-                      <span className="text-[11px] font-mono tabular-nums text-zinc-500 dark:text-zinc-400 shrink-0">
+                      <span className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400 shrink-0">
                         · ~{gal.photoCountHint} photos
                       </span>
                     )}

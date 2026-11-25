@@ -27,9 +27,9 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
-const SITE_TITLE = 'Ultimate Image Processing — Capture, AI Vision & Grading Suite';
+const SITE_TITLE = 'Ultimate Image Processor — Capture, AI Vision & Grading Suite';
 const SITE_DESCRIPTION =
-  'Ultimate Image Processing studio: full-resolution web & Instagram extraction, AI human-face filtering, non-destructive color grading & lenses, batch crop/resize, GIF89a synthesis, and Gemma 4 vision.';
+  'Ultimate Image Processor studio: full-resolution web & Instagram extraction, AI human-face filtering, non-destructive color grading & lenses, batch crop/resize, GIF89a synthesis, and Gemma 4 vision.';
 
 export const metadata: Metadata = {
   title: SITE_TITLE,
@@ -76,7 +76,7 @@ export default function RootLayout({
       </head>
       <body
         suppressHydrationWarning
-        className="studio-canvas-bg text-[#141413] dark:text-[#F5F4F0] font-sans antialiased min-h-screen selection:bg-blue-600/20 selection:text-blue-700 dark:selection:text-blue-300"
+        className="studio-canvas-bg text-[#0F141F] dark:text-[#F3F6FA] font-sans antialiased min-h-screen selection:bg-blue-600/20 selection:text-blue-700 dark:selection:text-blue-300"
       >
         {children}
       </body>

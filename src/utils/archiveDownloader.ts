@@ -1,3 +1,10 @@
+/**
+ * @module archiveDownloader
+ * Client-side orchestrator for compressed `.7z` (LZMA2) and `.zip` archive downloads.
+ * Streams real-time server progress via NDJSON (`POST /api/download-zip`), supports
+ * byte-level pause/resume via HTTP `Range` (`206 Partial Content`) over staged tokens,
+ * and falls back seamlessly to in-browser `JSZip` packaging if the server route is blocked.
+ */
 import JSZip from 'jszip';
 import {
   ArchiveFormat,
@@ -19,6 +26,7 @@ export type ArchiveDownloadStage =
   | 'error'
   | 'cancelled';
 
+/** Snapshot captured when a transfer is paused so downloading can resume via HTTP `Range`. */
 export interface ResumableArchiveState {
   token?: string;
   filename: string;
@@ -76,6 +84,7 @@ export interface ArchiveDownloadResult {
   error?: string;
 }
 
+/** Maps byte transfer progress onto a bounded percentage band (defaults to 85–100%). */
 export function computeTransferProgressPercent(
   receivedBytes: number,
   totalBytes?: number,
@@ -89,6 +98,7 @@ export function computeTransferProgressPercent(
   return Math.min(endPct, Math.max(startPct, Math.round(startPct + ratio * (endPct - startPct))));
 }
 
+/** Splits an NDJSON chunk buffer into parsed JSON event objects plus trailing incomplete text. */
 export function parseNdjsonBuffer(
   buffer: string
 ): { events: Record<string, any>[]; remainder: string } {
@@ -110,6 +120,7 @@ export function parseNdjsonBuffer(
   return { events, remainder };
 }
 
+/** Formats a compact status summary string for the sticky archive download progress bar. */
 export function formatArchiveStatusLine(progress: ArchiveDownloadProgress): string {
   const fmt = progress.format.toUpperCase();
   if (progress.stage === 'paused') {
@@ -127,6 +138,7 @@ export function formatArchiveStatusLine(progress: ArchiveDownloadProgress): stri
   return `${progress.percent}% · ${progress.message}`;
 }
 
+/** Best-effort server cleanup of a staged archive token after cancellation or completion. */
 export function cleanupStagedArchiveToken(token?: string): void {
   if (!token) return;
   void fetch(`/api/download-zip?token=${encodeURIComponent(token)}`, {
@@ -206,6 +218,11 @@ async function readResponseWithDownloadProgress(
   };
 }
 
+/**
+ * Executes or resumes a compressed `.7z`/`.zip` download with live stage & byte progress,
+ * pausing cleanly via `AbortController` (`signal.abort('PAUSED')`) and falling back to
+ * in-browser `JSZip` packaging when server egress is blocked.
+ */
 export async function downloadCompressedArchiveWithProgress(
   options: DownloadCompressedArchiveOptions
 ): Promise<ArchiveDownloadResult> {

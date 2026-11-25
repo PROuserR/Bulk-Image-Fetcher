@@ -19,6 +19,11 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/**
+ * POST /api/scrape/discover-galleries
+ * Scans a parent hub/category/search webpage (including pagination and intermediate item pages)
+ * and returns ranked child gallery links ready for selective or batch nested crawling.
+ */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));

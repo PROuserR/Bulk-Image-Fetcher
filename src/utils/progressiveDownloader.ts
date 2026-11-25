@@ -1,3 +1,10 @@
+/**
+ * @module progressiveDownloader
+ * Concurrent, pausable, zero-double-fetch image download queue for saving masters individually
+ * or directly into a user-selected directory via the File System Access API.
+ * Reuses Blobs already cached in memory or HTTP preview cache before hitting `/api/download-file`
+ * or CORS-direct master URLs.
+ */
 import { buildDownloadFileUrl, triggerBlobDownload } from './downloader';
 import {
   dedupeImageBlobFetch,
@@ -5,6 +12,7 @@ import {
   getFullResReusablePreviewUrl,
 } from './clientImageCache';
 
+/** Target image descriptor supplied to the progressive download queue. */
 export interface DownloadItemInput {
   id: string;
   url: string;
@@ -80,6 +88,7 @@ function sanitizeClientFilename(rawName: string, fallbackIdx: number): string {
   return /\.[a-z0-9]{2,5}$/i.test(cleaned) ? cleaned : `${cleaned}.jpg`;
 }
 
+/** Assigns collision-free filenames across a batch (e.g. `photo.jpg`, `photo_1.jpg`). */
 export function dedupeDownloadItems(items: DownloadItemInput[]): DownloadItemInput[] {
   const seen = new Set<string>();
   return items.map((item, idx) => {
@@ -144,6 +153,11 @@ async function fetchValidBlobWithTimeout(
   }
 }
 
+/**
+ * Resolves a single image `Blob` through layered fallbacks:
+ * 1) In-memory LRU Blob cache -> 2) Reusable full-res preview HTTP cache ->
+ * 3) Same-origin `/api/download-file` proxy -> 4) Direct & fallback CORS fetches.
+ */
 export async function fetchImageBlobWithFallbacks(
   item: DownloadItemInput,
   options: {
@@ -270,6 +284,7 @@ export async function fetchImageBlobWithFallbacks(
   };
 }
 
+/** Formats a byte count into a human-readable size string (`B`, `KB`, `MB`, `GB`). */
 export function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return '0 B';
   if (bytes < 1024) return `${bytes} B`;
@@ -280,6 +295,10 @@ export function formatBytes(bytes: number): string {
   return `${(mb / 1024).toFixed(2)} GB`;
 }
 
+/**
+ * Runs a bounded worker pool that fetches image blobs in parallel and serializes disk/browser
+ * save triggers with configurable stagger so downloads never drop or collide.
+ */
 export async function runProgressiveDownloads(
   rawItems: DownloadItemInput[],
   options: ProgressiveDownloadOptions = {}

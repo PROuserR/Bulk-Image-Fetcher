@@ -36,6 +36,11 @@ interface ZipImageInput {
   onlyFullRes?: boolean;
 }
 
+/**
+ * GET /api/download-zip?token=...
+ * Streams a previously staged `.7z` or `.zip` archive with HTTP `Range` (`206 Partial Content`)
+ * support for resumable client transfers. Deletes immediately on completion unless `resumable=1`.
+ */
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get('token') || '';
   if (!token) {
@@ -107,6 +112,10 @@ export async function GET(req: NextRequest) {
   });
 }
 
+/**
+ * DELETE /api/download-zip?token=...
+ * Removes a staged archive binary and metadata file from temporary disk storage.
+ */
 export async function DELETE(req: NextRequest) {
   const token = req.nextUrl.searchParams.get('token') || '';
   if (!token) {
@@ -116,6 +125,12 @@ export async function DELETE(req: NextRequest) {
   return NextResponse.json({ deleted: true });
 }
 
+/**
+ * POST /api/download-zip
+ * Resolves full-resolution image buffers, packages them as LZMA2 `.7z` or `.zip`,
+ * and either returns the binary directly or streams NDJSON stage progress (`streamProgress: true`)
+ * ending with a staged download token.
+ */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));

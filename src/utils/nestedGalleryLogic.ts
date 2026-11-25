@@ -1,8 +1,14 @@
+/**
+ * @module nestedGalleryLogic
+ * Discovery, scoring, pagination, intermediate-item unwrapping, and unified result merging
+ * for multi-gallery hub pages (`POST /api/scrape/discover-galleries` and `/api/scrape/nested`).
+ */
 import * as cheerio from 'cheerio';
 import type { ExtractionResult } from './htmlExtractor.ts';
 import type { ScrapedImage } from './scraperLogic.ts';
 import { isBlankOrPlaceholderUrl } from './scraperLogic.ts';
 
+/** Candidate child gallery or album card discovered on a parent hub/category webpage. */
 export interface DiscoveredGallery {
   id: string;
   title: string;
@@ -62,6 +68,7 @@ const GALLERY_URL_KEYWORD_REGEX =
 const PARENT_PAGINATION_REGEX =
   /(?:^|\/)(?:page\/)?[0-9]+\/?$|[?&](?:page|from|from_albums|p|offset)=[0-9]+/i;
 
+/** Returns true for item detail routes (e.g. `/video/<slug>/`) that link onward to a photo album. */
 export function isIntermediateItemPageUrl(url: string): boolean {
   if (!url) return false;
   try {
@@ -74,6 +81,7 @@ export function isIntermediateItemPageUrl(url: string): boolean {
   }
 }
 
+/** Returns true when a URL resembles a hub, search, tag, category, or creator directory page. */
 export function isHubOrSearchPageUrl(url: string): boolean {
   if (!url) return false;
   try {

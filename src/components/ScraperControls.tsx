@@ -25,12 +25,8 @@ import {
   ArrowUpRight,
   FolderTree,
   Wand2,
-  Crop,
-  Film,
-  Sparkles,
-  ScanFace,
 } from 'lucide-react';
-import ultimateHeroImg from '../assets/images/ultimate_hero_studio_1795515690881.jpg';
+import ultimateHeroImg from '../assets/images/hero_optical_bench_1795633734818.jpg';
 import { SAMPLE_PRESETS, NESTED_HUB_PRESET } from '../utils/samplePages';
 import {
   OPEN_TAB_HARVESTER_SCRIPT,
@@ -236,86 +232,39 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
   const firstSample = visibleSamples[0];
 
   return (
+    <div className="space-y-5">
     <section className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
       {/* Main Left Deck: Editorial Copy + Omnibox Scraper Controls */}
       <div
         className={`${
           compactHeader ? 'lg:col-span-12' : 'lg:col-span-7 xl:col-span-8'
-        } bg-white dark:bg-[#101218] border border-[#E2DED3] dark:border-white/[0.08] rounded-2xl p-6 sm:p-8 flex flex-col justify-between transition-colors`}
+        } bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] rounded-2xl p-6 sm:p-8 flex flex-col justify-between transition-colors shadow-[0_1px_2px_rgba(15,20,31,0.04)]`}
       >
         <div>
           {!compactHeader ? (
             <div className="mb-6">
-              <div className="text-xs font-mono text-zinc-500 dark:text-zinc-400 flex flex-wrap items-center gap-x-2 gap-y-1 mb-2.5">
+              <div className="text-[11px] font-mono uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-x-2 gap-y-0.5 mb-3">
                 <span className="font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap">
-                  Ultimate Image Processing
+                  Optical Lab
                 </span>
-                <span aria-hidden="true">·</span>
+                <span aria-hidden="true" className="hidden sm:inline">·</span>
                 <span className="whitespace-nowrap">Capture, AI Vision &amp; Grading Workbench</span>
               </div>
-              <h1 className="font-display text-3xl sm:text-4xl lg:text-[42px] font-bold text-[#141413] dark:text-[#F5F4F0] tracking-[-0.03em] leading-[1.08] [text-wrap:balance]">
-                The complete workbench for full-res capture &amp; AI image processing.
+              <h1 className="font-display text-3xl sm:text-4xl lg:text-[42px] font-bold text-[#0F141F] dark:text-[#F3F6FA] tracking-[-0.03em] leading-[1.08] [text-wrap:balance]">
+                Ultimate Image Processor for capture, AI vision &amp; precision grading.
               </h1>
-              <p className="text-sm sm:text-[15px] text-zinc-600 dark:text-zinc-400 leading-relaxed mt-3 max-w-2xl">
+              <p className="text-sm sm:text-[15px] text-slate-600 dark:text-slate-400 leading-relaxed mt-3.5 max-w-2xl">
                 Recover un-shrunk web &amp; Instagram originals, isolate portraits with{' '}
-                <span className="font-medium text-[#141413] dark:text-zinc-200">
+                <span className="font-medium text-[#0F141F] dark:text-slate-200">
                   Only Person · Exclude Landscape (AI)
                 </span>
                 , and pipe straight into non-destructive grading, crop/resize, GIF89a synthesis, and Gemma 4.
               </p>
-
-              {onSelectTab && (
-                <div className="mt-4 pt-4 border-t border-[#E2DED3]/75 dark:border-white/[0.06] flex flex-wrap items-center gap-1.5 text-xs">
-                  <span className="font-mono text-[11px] text-zinc-400 dark:text-zinc-500 mr-1 whitespace-nowrap">
-                    Studios:
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => onSelectTab('filters')}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F5F4EF] dark:bg-white/[0.05] hover:bg-[#EAE7DD] dark:hover:bg-white/[0.1] border border-[#E2DED3] dark:border-white/[0.08] text-[#141413] dark:text-zinc-200 font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                  >
-                    <Wand2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>Filter &amp; Lenses</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onSelectTab('crop')}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F5F4EF] dark:bg-white/[0.05] hover:bg-[#EAE7DD] dark:hover:bg-white/[0.1] border border-[#E2DED3] dark:border-white/[0.08] text-[#141413] dark:text-zinc-200 font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                  >
-                    <Crop className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>Crop &amp; Resize</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onSelectTab('gif')}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F5F4EF] dark:bg-white/[0.05] hover:bg-[#EAE7DD] dark:hover:bg-white/[0.1] border border-[#E2DED3] dark:border-white/[0.08] text-[#141413] dark:text-zinc-200 font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                  >
-                    <Film className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>GIF89a</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onSelectTab('classifier')}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F5F4EF] dark:bg-white/[0.05] hover:bg-[#EAE7DD] dark:hover:bg-white/[0.1] border border-[#E2DED3] dark:border-white/[0.08] text-[#141413] dark:text-zinc-200 font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                  >
-                    <ScanFace className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>Face Sort</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onSelectTab('gemma')}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F5F4EF] dark:bg-white/[0.05] hover:bg-[#EAE7DD] dark:hover:bg-white/[0.1] border border-[#E2DED3] dark:border-white/[0.08] text-[#141413] dark:text-zinc-200 font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>Gemma 4</span>
-                  </button>
-                </div>
-              )}
             </div>
           ) : (
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
-              <h1 className="font-display text-xl font-bold text-[#141413] dark:text-[#F5F4F0] tracking-tight">
-                Capture &amp; Process Full-Resolution Sources
+              <h1 className="font-display text-xl font-bold text-[#0F141F] dark:text-[#F3F6FA] tracking-tight">
+                Ultimate Image Processor — Capture &amp; Pipeline
               </h1>
             </div>
           )}
@@ -324,7 +273,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
           <div
             role="tablist"
             aria-label="Extraction Source Mode"
-            className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1 p-1 bg-[#F2EFE8] dark:bg-[#08090C] border border-[#E2DED3] dark:border-white/[0.08] rounded-xl w-full sm:w-fit max-w-full mb-4"
+            className="grid grid-cols-2 sm:inline-flex sm:flex-wrap lg:flex-nowrap items-center gap-0.5 p-1 bg-[#EEF1F6] dark:bg-[#090C12] border border-[#DCE1EB] dark:border-white/[0.08] rounded-xl w-full sm:w-fit max-w-full mb-4"
           >
             <button
               type="button"
@@ -332,10 +281,10 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               aria-selected={mode === 'url'}
               onClick={() => setMode('url')}
               onKeyDown={handleModeTabKeyDown}
-              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`flex items-center justify-center sm:justify-start gap-1 px-2 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'url'
-                  ? 'bg-white dark:bg-[#191C25] text-[#141413] dark:text-white shadow-xs'
-                  : 'text-zinc-600 dark:text-zinc-400 hover:text-[#141413] dark:hover:text-zinc-200'
+                  ? 'bg-white dark:bg-[#171C28] text-[#0F141F] dark:text-[#F3F6FA] shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-[#0F141F] dark:hover:text-slate-200'
               }`}
             >
               <Globe className="w-3.5 h-3.5 shrink-0" />
@@ -348,10 +297,10 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               aria-selected={mode === 'nested'}
               onClick={() => setMode('nested')}
               onKeyDown={handleModeTabKeyDown}
-              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`flex items-center justify-center sm:justify-start gap-1 px-2 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'nested'
-                  ? 'bg-white dark:bg-[#191C25] text-[#141413] dark:text-white shadow-xs'
-                  : 'text-zinc-600 dark:text-zinc-400 hover:text-[#141413] dark:hover:text-zinc-200'
+                  ? 'bg-white dark:bg-[#171C28] text-[#0F141F] dark:text-[#F3F6FA] shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-[#0F141F] dark:hover:text-slate-200'
               }`}
             >
               <FolderTree className="w-3.5 h-3.5 shrink-0" />
@@ -364,12 +313,12 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               aria-selected={mode === 'instagram'}
               onClick={() => setMode('instagram')}
               onKeyDown={handleModeTabKeyDown}
-              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`flex items-center justify-center sm:justify-start gap-1 px-2 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'instagram'
-                  ? 'bg-white dark:bg-[#191C25] text-[#141413] dark:text-white shadow-xs'
+                  ? 'bg-white dark:bg-[#171C28] text-[#0F141F] dark:text-[#F3F6FA] shadow-xs'
                   : instagramLoginRequired
                     ? 'text-amber-700 dark:text-amber-400 font-semibold'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-[#141413] dark:hover:text-zinc-200'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-[#0F141F] dark:hover:text-slate-200'
               }`}
             >
               <Instagram className="w-3.5 h-3.5 shrink-0" />
@@ -382,12 +331,12 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               aria-selected={mode === 'harvester'}
               onClick={() => setMode('harvester')}
               onKeyDown={handleModeTabKeyDown}
-              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`flex items-center justify-center sm:justify-start gap-1 px-2 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'harvester'
-                  ? 'bg-white dark:bg-[#191C25] text-[#141413] dark:text-white shadow-xs'
+                  ? 'bg-white dark:bg-[#171C28] text-[#0F141F] dark:text-[#F3F6FA] shadow-xs'
                   : geoBlocked
                     ? 'text-amber-700 dark:text-amber-400 font-semibold'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-[#141413] dark:hover:text-zinc-200'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-[#0F141F] dark:hover:text-slate-200'
               }`}
             >
               <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
@@ -400,10 +349,10 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               aria-selected={mode === 'paste'}
               onClick={() => setMode('paste')}
               onKeyDown={handleModeTabKeyDown}
-              className={`flex items-center justify-center sm:justify-start gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`flex items-center justify-center sm:justify-start gap-1 px-2 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'paste'
-                  ? 'bg-white dark:bg-[#191C25] text-[#141413] dark:text-white shadow-xs'
-                  : 'text-zinc-600 dark:text-zinc-400 hover:text-[#141413] dark:hover:text-zinc-200'
+                  ? 'bg-white dark:bg-[#171C28] text-[#0F141F] dark:text-[#F3F6FA] shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-[#0F141F] dark:hover:text-slate-200'
               }`}
             >
               <Code className="w-3.5 h-3.5 shrink-0" />
@@ -436,14 +385,14 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                         : 'https://example.com/gallery, instagram.com/username, or batch preview URLs...'
                   }
                   required={mode === 'url' || mode === 'nested'}
-                  className="w-full pl-11 pr-10 py-3 bg-[#F6F5F1] dark:bg-[#0A0B0E] border border-[#E4E0D6] dark:border-white/[0.1] rounded-xl text-sm text-[#141413] dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
+                  className="w-full pl-11 pr-10 py-3 bg-[#F4F6F9] dark:bg-[#090C12] border border-[#DCE1EB] dark:border-white/[0.1] rounded-xl text-sm text-[#0F141F] dark:text-[#F3F6FA] placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
                 />
                 {url && (
                   <button
                     type="button"
                     aria-label="Clear URL input"
                     onClick={() => setUrl('')}
-                    className="absolute inset-y-0 right-2.5 flex items-center text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 p-1 cursor-pointer"
+                    className="absolute inset-y-0 right-2.5 flex items-center text-slate-400 hover:text-[#0F141F] dark:hover:text-slate-200 p-1 cursor-pointer"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -455,7 +404,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                   <button
                     type="submit"
                     disabled={isDiscoveringNested || isCrawlingNested || !url.trim()}
-                    className="flex items-center justify-center gap-2 px-4 py-3 bg-[#F2EFE8] hover:bg-[#E7E2D6] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] disabled:opacity-60 text-[#141413] dark:text-white font-semibold text-sm rounded-xl transition-colors whitespace-nowrap cursor-pointer"
+                    className="flex items-center justify-center gap-2 px-4 py-3 bg-[#EEF1F6] hover:bg-[#E2E7F0] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] disabled:opacity-60 text-[#0F141F] dark:text-[#F3F6FA] font-semibold text-sm rounded-xl transition-colors whitespace-nowrap cursor-pointer"
                   >
                     {isDiscoveringNested ? (
                       <>
@@ -516,28 +465,28 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
 
           {/* Mode: Webpage URL Options & Quick Test Presets */}
           {mode === 'url' && (
-            <div className="pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-[#E4E0D6]/80 dark:border-white/[0.06] text-xs">
+            <div className="pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-[#DCE1EB] dark:border-white/[0.06] text-xs">
               <label
-                className="flex items-center gap-2 cursor-pointer select-none text-zinc-700 dark:text-zinc-300 font-medium whitespace-nowrap"
+                className="flex items-center gap-2 cursor-pointer select-none text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap"
                 title="Resolves signed master links inside linked detail / photo subpages"
               >
                 <input
                   type="checkbox"
                   checked={followLinkedPages}
                   onChange={(e) => setFollowLinkedPages(e.target.checked)}
-                  className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 accent-blue-600 shrink-0"
+                  className="w-4 h-4 rounded border-slate-300 dark:border-slate-700 accent-blue-600 shrink-0"
                 />
                 <span>Follow Linked Detail Webpages</span>
               </label>
 
               <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap shrink-0">
-                <span className="text-zinc-500 dark:text-zinc-400 mr-0.5 whitespace-nowrap">Try sample:</span>
+                <span className="text-slate-500 dark:text-slate-400 mr-0.5 whitespace-nowrap">Try sample:</span>
                 {visibleSamples.map((preset) => (
                   <button
                     key={preset.id}
                     type="button"
                     onClick={() => handleSelectPreset(preset.url, preset.html)}
-                    className="px-2.5 py-1 bg-[#F2EFE8] hover:bg-[#E7E2D6] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-[#141413] dark:text-zinc-200 rounded-lg transition-colors text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer"
+                    className="px-2.5 py-1 bg-[#EEF1F6] hover:bg-[#E2E7F0] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-[#0F141F] dark:text-slate-200 rounded-lg transition-colors text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer"
                   >
                     {preset.name.split(' ')[0]}
                   </button>
@@ -549,7 +498,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                     setUrl('preset:nested_galleries_hub');
                     triggerNestedDiscovery('preset:nested_galleries_hub', true);
                   }}
-                  className="px-2.5 py-1 bg-[#F2EFE8] hover:bg-[#E7E2D6] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-[#141413] dark:text-zinc-200 rounded-lg transition-colors text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer"
+                  className="px-2.5 py-1 bg-[#EEF1F6] hover:bg-[#E2E7F0] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-[#0F141F] dark:text-slate-200 rounded-lg transition-colors text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer"
                   title={NESTED_HUB_PRESET.description}
                 >
                   Nested Hub
@@ -560,31 +509,31 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
 
           {/* Mode: Nested Multi-Gallery Options */}
           {mode === 'nested' && (
-            <div className="pt-3 flex flex-col gap-3 border-t border-[#E4E0D6]/80 dark:border-white/[0.06] text-xs animate-fadeIn">
+            <div className="pt-3 flex flex-col gap-3 border-t border-[#DCE1EB] dark:border-white/[0.06] text-xs animate-fadeIn">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-4">
                   <label
-                    className="flex items-center gap-2 cursor-pointer select-none text-zinc-700 dark:text-zinc-300 font-medium whitespace-nowrap"
+                    className="flex items-center gap-2 cursor-pointer select-none text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap"
                     title="Follows every photo thumbnail detail webpage inside each child gallery to get full-res masters"
                   >
                     <input
                       type="checkbox"
                       checked={followLinkedPages}
                       onChange={(e) => setFollowLinkedPages(e.target.checked)}
-                      className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 accent-blue-600 shrink-0"
+                      className="w-4 h-4 rounded border-slate-300 dark:border-slate-700 accent-blue-600 shrink-0"
                     />
                     <span>Follow Linked Detail Webpages</span>
                   </label>
 
                   <label
-                    className="flex items-center gap-2 cursor-pointer select-none text-zinc-700 dark:text-zinc-300 font-medium whitespace-nowrap"
+                    className="flex items-center gap-2 cursor-pointer select-none text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap"
                     title="Keep discovered child gallery links on the same root website domain"
                   >
                     <input
                       type="checkbox"
                       checked={nestedSameOriginOnly}
                       onChange={(e) => setNestedSameOriginOnly(e.target.checked)}
-                      className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 accent-blue-600 shrink-0"
+                      className="w-4 h-4 rounded border-slate-300 dark:border-slate-700 accent-blue-600 shrink-0"
                     />
                     <span>Same domain only</span>
                   </label>
@@ -597,7 +546,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                     setUrl('preset:nested_galleries_hub');
                     triggerNestedDiscovery('preset:nested_galleries_hub', false);
                   }}
-                  className="px-3 py-1 bg-[#F2EFE8] hover:bg-[#E7E2D6] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-[#141413] dark:text-zinc-200 rounded-lg transition-colors text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                  className="px-3 py-1 bg-[#EEF1F6] hover:bg-[#E2E7F0] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-[#0F141F] dark:text-slate-200 rounded-lg transition-colors text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
                 >
                   Try Nested Hub Sample (3 Galleries)
                 </button>
@@ -614,17 +563,17 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                     value={nestedFilterPattern}
                     onChange={(e) => setNestedFilterPattern(e.target.value)}
                     placeholder="Optional URL or title filter (e.g. /galleries/ or /2026/i)"
-                    className="w-full px-3 py-2 bg-[#F6F5F1] dark:bg-[#0A0B0E] border border-[#E4E0D6] dark:border-white/[0.1] rounded-lg font-mono text-xs text-[#141413] dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    className="w-full px-3 py-2 bg-[#F4F6F9] dark:bg-[#090C12] border border-[#DCE1EB] dark:border-white/[0.1] rounded-lg font-mono text-xs text-[#0F141F] dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
                 </div>
 
-                <label className="flex items-center gap-2 text-zinc-600 dark:text-zinc-400 shrink-0">
+                <label className="flex items-center gap-2 text-slate-600 dark:text-slate-400 shrink-0">
                   <span className="font-medium whitespace-nowrap">Max Galleries</span>
                   <select
                     aria-label="Maximum child galleries to discover"
                     value={nestedMaxGalleries}
                     onChange={(e) => setNestedMaxGalleries(Number(e.target.value))}
-                    className="px-2.5 py-2 bg-[#F6F5F1] dark:bg-[#0A0B0E] border border-[#E4E0D6] dark:border-white/[0.1] rounded-lg font-mono text-xs tabular-nums text-[#141413] dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    className="px-2.5 py-2 bg-[#F4F6F9] dark:bg-[#090C12] border border-[#DCE1EB] dark:border-white/[0.1] rounded-lg font-mono text-xs tabular-nums text-[#0F141F] dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                   >
                     <option value={15}>15</option>
                     <option value={30}>30</option>
@@ -638,21 +587,21 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
 
           {/* Mode: Instagram Profile Studio */}
           {mode === 'instagram' && (
-            <div className="pt-4 border-t border-[#E4E0D6]/80 dark:border-white/[0.06] space-y-4 animate-fadeIn">
+            <div className="pt-4 border-t border-[#DCE1EB] dark:border-white/[0.06] space-y-4 animate-fadeIn">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-semibold text-[#141413] dark:text-zinc-50">
+                  <h2 className="text-sm font-semibold text-[#0F141F] dark:text-slate-50">
                     Instagram Profile Full-Resolution Extractor
                   </h2>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                    Extracts public grids & carousels instantly, or add your <code className="font-mono text-zinc-700 dark:text-zinc-300">sessionid</code> cookie to paginate timelines.
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Extracts public grids & carousels instantly, or add your <code className="font-mono text-slate-700 dark:text-slate-300">sessionid</code> cookie to paginate timelines.
                   </p>
                 </div>
 
                 <button
                   type="button"
                   onClick={handleCopyIgHarvester}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#F2EFE8] hover:bg-[#E7E2D6] dark:bg-white/[0.08] dark:hover:bg-white/[0.12] text-[#141413] dark:text-zinc-200 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 self-start sm:self-center cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#EEF1F6] hover:bg-[#E2E7F0] dark:bg-white/[0.08] dark:hover:bg-white/[0.12] text-[#0F141F] dark:text-slate-200 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 self-start sm:self-center cursor-pointer"
                 >
                   {copiedIgHarvester ? (
                     <>
@@ -672,7 +621,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                 <div className="md:col-span-5">
                   <label
                     htmlFor="ig-profile-input"
-                    className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5"
+                    className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
                   >
                     Profile URL or @username
                   </label>
@@ -692,16 +641,16 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                       }
                     }}
                     placeholder="https://www.instagram.com/natgeo/ or @natgeo"
-                    className="w-full px-3.5 py-2.5 bg-[#F6F5F1] dark:bg-[#0A0B0E] border border-[#E4E0D6] dark:border-white/[0.1] rounded-xl text-sm text-[#141413] dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    className="w-full px-3.5 py-2.5 bg-[#F4F6F9] dark:bg-[#090C12] border border-[#DCE1EB] dark:border-white/[0.1] rounded-xl text-sm text-[#0F141F] dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
                 </div>
 
                 <div className="md:col-span-4">
                   <label
                     htmlFor="ig-session-input"
-                    className="flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5"
+                    className="flex items-center gap-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
                   >
-                    <KeyRound className="w-3.5 h-3.5 text-zinc-400" />
+                    <KeyRound className="w-3.5 h-3.5 text-slate-400" />
                     <span>Optional sessionid or Cookie Header</span>
                   </label>
                   <div className="relative">
@@ -717,13 +666,13 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                         }
                       }}
                       placeholder="sessionid or csrftoken=...; sessionid=..."
-                      className="w-full pl-3.5 pr-9 py-2.5 bg-[#F6F5F1] dark:bg-[#0A0B0E] border border-[#E4E0D6] dark:border-white/[0.1] rounded-xl font-mono text-xs text-[#141413] dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                      className="w-full pl-3.5 pr-9 py-2.5 bg-[#F4F6F9] dark:bg-[#090C12] border border-[#DCE1EB] dark:border-white/[0.1] rounded-xl font-mono text-xs text-[#0F141F] dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                     />
                     <button
                       type="button"
                       aria-label={showSessionToken ? 'Hide sessionid' : 'Show sessionid'}
                       onClick={() => setShowSessionToken(!showSessionToken)}
-                      className="absolute inset-y-0 right-2.5 flex items-center text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer"
+                      className="absolute inset-y-0 right-2.5 flex items-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
                     >
                       {showSessionToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -734,7 +683,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                   <div className="w-24">
                     <label
                       htmlFor="ig-max-posts"
-                      className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
                     >
                       Max Photos
                     </label>
@@ -742,7 +691,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                       id="ig-max-posts"
                       value={instagramMaxPosts}
                       onChange={(e) => onInstagramMaxPostsChange?.(Number(e.target.value))}
-                      className="w-full px-2.5 py-2.5 bg-[#F6F5F1] dark:bg-[#0A0B0E] border border-[#E4E0D6] dark:border-white/[0.1] rounded-xl text-xs font-mono tabular-nums text-[#141413] dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                      className="w-full px-2.5 py-2.5 bg-[#F4F6F9] dark:bg-[#090C12] border border-[#DCE1EB] dark:border-white/[0.1] rounded-xl text-xs font-mono tabular-nums text-[#0F141F] dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                     >
                       <option value={50}>50</option>
                       <option value={100}>100</option>
@@ -770,7 +719,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
                 <span>
                   Tip: If your server IP hits an Instagram rate limit, run the IG Harvester script in your logged-in tab and paste its JSON.
                 </span>
@@ -788,15 +737,15 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
 
           {/* Mode: Open-Tab Harvester & Relay Bypass */}
           {mode === 'harvester' && (
-            <div className="pt-4 border-t border-[#E4E0D6]/80 dark:border-white/[0.06] space-y-4 animate-fadeIn">
+            <div className="pt-4 border-t border-[#DCE1EB] dark:border-white/[0.06] space-y-4 animate-fadeIn">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-start gap-2.5">
-                  <Terminal className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
+                  <Terminal className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
                   <div>
-                    <h2 className="text-sm font-semibold text-[#141413] dark:text-zinc-50">
+                    <h2 className="text-sm font-semibold text-[#0F141F] dark:text-slate-50">
                       Open-Tab Console Harvester &amp; Relay Worker
                     </h2>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 leading-relaxed">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
                       Bypass server geo-blocks or private sessions by running the harvester script in your open gallery browser tab, then pasting the resulting JSON manifest.
                     </p>
                   </div>
@@ -806,7 +755,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                   <button
                     type="button"
                     onClick={handleCopyHarvester}
-                    className="flex items-center gap-1.5 px-3.5 py-2 bg-[#141413] hover:bg-zinc-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-[#0F141F] hover:bg-slate-800 dark:bg-blue-600 dark:hover:bg-blue-500 text-white rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
                   >
                     {copiedHarvester ? (
                       <>
@@ -824,7 +773,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                   <button
                     type="button"
                     onClick={() => setMode('paste')}
-                    className="px-3.5 py-2 border border-[#E4E0D6] dark:border-white/[0.1] hover:bg-[#F2EFE8] dark:hover:bg-white/[0.06] text-[#141413] dark:text-zinc-200 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
+                    className="px-3.5 py-2 border border-[#DCE1EB] dark:border-white/[0.1] hover:bg-[#EEF1F6] dark:hover:bg-white/[0.06] text-[#0F141F] dark:text-slate-200 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
                   >
                     Paste JSON Output
                   </button>
@@ -834,9 +783,9 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
                 <label
                   htmlFor="relay-url-input"
-                  className="flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300 shrink-0"
+                  className="flex items-center gap-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 shrink-0"
                 >
-                  <Server className="w-3.5 h-3.5 text-zinc-400" />
+                  <Server className="w-3.5 h-3.5 text-slate-400" />
                   <span>Optional Relay / CORS Worker URL</span>
                 </label>
                 <input
@@ -845,7 +794,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                   value={relayUrl}
                   onChange={(e) => onRelayUrlChange?.(e.target.value)}
                   placeholder="https://your-non-uk-worker.workers.dev/?url="
-                  className="flex-1 px-3.5 py-2 bg-[#F6F5F1] dark:bg-[#0A0B0E] border border-[#E4E0D6] dark:border-white/[0.1] rounded-xl font-mono text-xs text-[#141413] dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  className="flex-1 px-3.5 py-2 bg-[#F4F6F9] dark:bg-[#090C12] border border-[#DCE1EB] dark:border-white/[0.1] rounded-xl font-mono text-xs text-[#0F141F] dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
               </div>
             </div>
@@ -853,11 +802,11 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
 
           {/* Mode: Paste Previews / HTML / JSON */}
           {mode === 'paste' && (
-            <div className="pt-4 border-t border-[#E4E0D6]/80 dark:border-white/[0.06] space-y-2 animate-fadeIn">
+            <div className="pt-4 border-t border-[#DCE1EB] dark:border-white/[0.06] space-y-2 animate-fadeIn">
               <div className="flex items-center justify-between">
                 <label
                   htmlFor="custom-html-textarea"
-                  className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
+                  className="block text-xs font-medium text-slate-700 dark:text-slate-300"
                 >
                   Paste Preview Image URLs (one per line), Raw HTML Source, or Harvester JSON Manifest
                 </label>
@@ -865,7 +814,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                   <button
                     type="button"
                     onClick={() => setCustomHtml('')}
-                    className="text-xs text-zinc-500 hover:text-[#141413] dark:hover:text-zinc-200 cursor-pointer"
+                    className="text-xs text-slate-500 hover:text-[#0F141F] dark:hover:text-slate-200 cursor-pointer"
                   >
                     Clear paste box
                   </button>
@@ -879,7 +828,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                 placeholder={
                   'https://cdn.example.com/images/thumb/photo_01.jpg\nhttps://example.com/photo/123456\n— or paste View-Source HTML or Harvester JSON —'
                 }
-                className="w-full p-3.5 bg-[#F6F5F1] dark:bg-[#0A0B0E] border border-[#E4E0D6] dark:border-white/[0.1] rounded-xl font-mono text-xs text-[#141413] dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                className="w-full p-3.5 bg-[#F4F6F9] dark:bg-[#090C12] border border-[#DCE1EB] dark:border-white/[0.1] rounded-xl font-mono text-xs text-[#0F141F] dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
           )}
@@ -888,23 +837,24 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
 
       {/* Right Column: Optical Studio Hero Card (shown on empty state / landing hero) */}
       {!compactHeader && (
-        <aside className="lg:col-span-5 xl:col-span-4 relative rounded-2xl overflow-hidden border border-[#E2DED3] dark:border-white/[0.08] bg-[#141413] min-h-[280px] flex flex-col justify-end group">
+        <aside className="lg:col-span-5 xl:col-span-4 relative rounded-2xl overflow-hidden border border-[#DCE1EB] dark:border-white/[0.08] bg-[#090C12] min-h-[300px] flex flex-col justify-end group">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={ultimateHeroImg.src}
-            alt="Precision cinema lens, brass aperture ring, optical loupe, and portrait contact prints"
+            alt="Anodized black cinema prime lens, optical loupe, and portrait contact strip on dark slate"
+            referrerPolicy="no-referrer"
             className="absolute inset-0 w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-500 ease-out"
           />
           <div
             aria-hidden="true"
-            className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/10"
+            className="absolute inset-0 bg-gradient-to-t from-[#07090E]/92 via-[#07090E]/45 to-[#07090E]/10"
           />
 
           <div className="relative z-10 p-5 sm:p-6 text-white space-y-3">
-            <div className="flex items-center gap-2 text-[11px] font-mono text-zinc-300">
+            <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.06em] text-blue-300">
               <span>Optical Pipeline</span>
-              <span aria-hidden="true">·</span>
-              <span>AI Vision Ready</span>
+              <span aria-hidden="true" className="text-white/40">·</span>
+              <span className="text-slate-200">AI Vision Ready</span>
             </div>
             <h2 className="font-display text-lg sm:text-xl font-bold leading-snug text-white [text-wrap:balance]">
               Inspect, filter faces with AI, and process every pixel.
@@ -914,7 +864,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                 <button
                   type="button"
                   onClick={() => handleSelectPreset(firstSample.url, firstSample.html)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white text-[#141413] hover:bg-zinc-100 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white text-[#0F141F] hover:bg-slate-100 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
                 >
                   <span>Run Nature Sample</span>
                   <ArrowUpRight className="w-3.5 h-3.5" />
@@ -924,9 +874,9 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                 <button
                   type="button"
                   onClick={() => onSelectTab('filters')}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-white/15 hover:bg-white/25 backdrop-blur-sm border border-white/20 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#0F141F]/65 hover:bg-[#0F141F]/85 backdrop-blur-sm border border-white/20 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
                 >
-                  <Wand2 className="w-3.5 h-3.5" />
+                  <Wand2 className="w-3.5 h-3.5 text-blue-400" />
                   <span>Filter Studio</span>
                 </button>
               )}
@@ -935,5 +885,47 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
         </aside>
       )}
     </section>
+
+    {/* 4-Column Architectural Capability Strip */}
+    {!compactHeader && (
+      <div className="bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] rounded-2xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-[#DCE1EB] dark:divide-white/[0.08] overflow-hidden shadow-[0_1px_2px_rgba(15,20,31,0.04)]">
+        {[
+          {
+            idx: '01',
+            title: 'Un-Shrunk Masters',
+            desc: 'CDN resolution recovery & carousels',
+          },
+          {
+            idx: '02',
+            title: 'AI Portrait Isolation',
+            desc: 'Only Person · Exclude Landscape (AI)',
+          },
+          {
+            idx: '03',
+            title: 'Color & AR Grading',
+            desc: '8 presets, 14 controls & face lenses',
+          },
+          {
+            idx: '04',
+            title: 'Batch & Motion Export',
+            desc: 'LZMA2 .7Z, .ZIP, GIF89a & REST API',
+          },
+        ].map((item) => (
+          <div key={item.idx} className="px-5 py-4 flex flex-col gap-1">
+            <div className="flex items-center gap-2 font-mono text-[11px] font-semibold tracking-wider text-blue-600 dark:text-blue-400">
+              <span>{item.idx}</span>
+              <span aria-hidden="true" className="text-slate-300 dark:text-white/20">·</span>
+              <span className="text-[#0F141F] dark:text-[#F3F6FA] font-display text-xs tracking-normal font-bold">
+                {item.title}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-snug">
+              {item.desc}
+            </p>
+          </div>
+        ))}
+      </div>
+    )}
+    </div>
   );
 };

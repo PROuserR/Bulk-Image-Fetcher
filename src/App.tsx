@@ -30,13 +30,13 @@ import {
 const StudioTabSkeleton = () => (
   <div
     aria-label="Loading studio"
-    className="bg-white dark:bg-[#111319] border border-[#E4E0D6] dark:border-white/[0.08] rounded-2xl p-6 space-y-4 animate-pulse"
+    className="bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] rounded-2xl p-6 space-y-4 animate-pulse"
   >
-    <div className="h-6 w-52 bg-[#EFECE4] dark:bg-zinc-800 rounded-md" />
-    <div className="h-4 w-80 max-w-full bg-[#F6F5F1] dark:bg-zinc-800/70 rounded" />
+    <div className="h-6 w-52 bg-[#EEF1F6] dark:bg-slate-800 rounded-md" />
+    <div className="h-4 w-80 max-w-full bg-[#F4F6F9] dark:bg-slate-800/70 rounded" />
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-      <div className="h-40 bg-[#EFECE4]/70 dark:bg-zinc-800/40 rounded-xl" />
-      <div className="h-40 bg-[#EFECE4]/70 dark:bg-zinc-800/40 rounded-xl md:col-span-2" />
+      <div className="h-40 bg-[#EEF1F6]/80 dark:bg-slate-800/40 rounded-xl" />
+      <div className="h-40 bg-[#EEF1F6]/80 dark:bg-slate-800/40 rounded-xl md:col-span-2" />
     </div>
   </div>
 );
@@ -1764,7 +1764,7 @@ export default function App() {
       if (!response.ok) throw new Error('Failed to create project archive.');
 
       const blob = await response.blob();
-      triggerBlobDownload(blob, 'fullres_scraper_full_codebase.zip');
+      triggerBlobDownload(blob, 'ultimate_image_processor_codebase.zip');
       showToast('Full codebase exported successfully as ready-to-run ZIP!');
     } catch (err: any) {
       setErrorMessage(`Export failed: ${err.message}`);
@@ -1789,7 +1789,7 @@ export default function App() {
 
   return (
     <MotionConfig reducedMotion="user">
-      <div className="min-h-screen flex text-[#141413] dark:text-[#F5F4F0] font-sans transition-colors duration-200">
+      <div className="min-h-screen flex text-[#0F141F] dark:text-[#F3F6FA] font-sans transition-colors duration-200">
         {/* Left Studio Navigation Rail (Desktop/Tablet) */}
         <StudioSidebar
           activeTab={activeTab}
@@ -1932,12 +1932,12 @@ export default function App() {
                       {Array.from({ length: 8 }).map((_, idx) => (
                         <div
                           key={idx}
-                          className="bg-white dark:bg-[#111319] border border-[#E4E0D6] dark:border-white/[0.08] rounded-xl overflow-hidden animate-pulse"
+                          className="bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] rounded-xl overflow-hidden animate-pulse"
                         >
-                          <div className="aspect-[4/3] bg-[#EFECE4] dark:bg-zinc-800/60" />
+                          <div className="aspect-[4/3] bg-[#EEF1F6] dark:bg-slate-800/60" />
                           <div className="p-3.5 space-y-2.5">
-                            <div className="h-3.5 w-3/4 bg-[#EFECE4] dark:bg-zinc-800 rounded" />
-                            <div className="h-3 w-1/2 bg-[#F6F5F1] dark:bg-zinc-800/70 rounded" />
+                            <div className="h-3.5 w-3/4 bg-[#EEF1F6] dark:bg-slate-800 rounded" />
+                            <div className="h-3 w-1/2 bg-[#F4F6F9] dark:bg-slate-800/70 rounded" />
                           </div>
                         </div>
                       ))}
@@ -2145,11 +2145,11 @@ export default function App() {
             />
           )}
 
-          <footer className="mt-auto border-t border-[#E2DED3] dark:border-white/[0.08] py-4 px-4 sm:px-6 lg:px-8 bg-[#FAF9F5]/95 dark:bg-[#0B0D12]/95 transition-colors">
-            <div className="max-w-[1440px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+          <footer className="mt-auto border-t border-[#DCE1EB] dark:border-white/[0.08] py-4 px-4 sm:px-6 lg:px-8 bg-white/95 dark:bg-[#0A0D14]/95 transition-colors">
+            <div className="max-w-[1440px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
               <div className="flex items-center gap-2">
-                <span className="font-display font-semibold text-[#141413] dark:text-zinc-200">
-                  Ultimate Image Processing
+                <span className="font-display font-semibold text-[#0F141F] dark:text-[#F3F6FA]">
+                  Ultimate Image Processor
                 </span>
                 <span aria-hidden="true">·</span>
                 <span>Capture, AI Vision, Color Grading &amp; Post-Production Suite</span>

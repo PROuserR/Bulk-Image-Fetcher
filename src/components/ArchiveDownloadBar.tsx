@@ -35,6 +35,10 @@ const STAGE_LABEL: Record<ArchiveDownloadProgress['stage'], string> = {
   error: 'Failed',
 };
 
+/**
+ * Live progress HUD for `.7Z` (LZMA2) and `.ZIP` archive builds and HTTP Range downloads,
+ * supporting Pause, Resume, Cancel, and Dismiss controls.
+ */
 export const ArchiveDownloadBar: React.FC<ArchiveDownloadBarProps> = ({
   progress,
   onPause,
@@ -76,7 +80,7 @@ export const ArchiveDownloadBar: React.FC<ArchiveDownloadBarProps> = ({
     <section
       aria-label="Compressed archive download progress"
       data-testid="archive-download-bar"
-      className={`bg-white dark:bg-[#101218] rounded-xl border border-[#E2DED3] dark:border-white/[0.08] transition-colors ${
+      className={`bg-white dark:bg-[#0E121B] rounded-xl border border-[#DCE1EB] dark:border-white/[0.08] transition-colors ${
         compact ? 'p-3' : 'p-4'
       }`}
     >

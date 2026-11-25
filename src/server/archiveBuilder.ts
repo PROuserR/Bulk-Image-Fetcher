@@ -1,3 +1,10 @@
+/**
+ * @module archiveBuilder
+ * Server-side archive packager and resumable staging store.
+ * Builds either multi-threaded LZMA2 `.7z` archives (via `7zip-bin`) or `STORE`/`DEFLATE` `.zip`
+ * archives (via `JSZip`), and temporarily stages built archives on `/tmp` by UUIDv4 token so
+ * clients can resume interrupted transfers via HTTP `Range` (`206 Partial Content`).
+ */
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -253,6 +260,7 @@ async function pruneExpiredStagedArchives(): Promise<void> {
   }
 }
 
+/** Persists a built archive buffer in `/tmp` under a random UUIDv4 token for 15 minutes. */
 export async function saveStagedArchive(
   buffer: Buffer,
   meta: Omit<StagedArchiveMetadata, 'token' | 'totalBytes' | 'createdAt'>
@@ -277,6 +285,7 @@ export async function saveStagedArchive(
   return fullMeta;
 }
 
+/** Reads a staged archive and its metadata without deleting it (used for HTTP Range resumes). */
 export async function readStagedArchive(
   token: string
 ): Promise<{ buffer: Buffer; meta: StagedArchiveMetadata } | null> {
@@ -298,6 +307,7 @@ export async function readStagedArchive(
   }
 }
 
+/** Deletes a staged archive binary and metadata pair from `/tmp`. */
 export async function deleteStagedArchive(token: string): Promise<void> {
   if (!UUID_V4_RE.test(token)) return;
   const binPath = path.join(STAGED_ARCHIVE_DIR, `${token}.bin`);
@@ -308,6 +318,7 @@ export async function deleteStagedArchive(token: string): Promise<void> {
   ]);
 }
 
+/** Reads a staged archive once and immediately deletes the temporary files on completion. */
 export async function consumeStagedArchive(
   token: string
 ): Promise<{ buffer: Buffer; meta: StagedArchiveMetadata } | null> {

@@ -166,11 +166,11 @@ export function renderViewImageHtml(params: ViewImageTemplateParams): string {
         <circle cx="8.5" cy="8.5" r="1.5"/>
         <polyline points="21 15 16 10 5 21"/>
       </svg>
-      <span>FullRes Master Viewer</span>
+      <span>Ultimate Image Processor Viewer</span>
     </a>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <span class="badge">${escapeHtml(method)}</span>
-      <a href="/" class="btn btn-secondary">Back to Scraper</a>
+      <a href="/" class="btn btn-secondary">Back to Capture Studio</a>
       <a href="/api/download-file?url=${encodeURIComponent(imageUrl)}&filename=${encodeURIComponent(title)}&referer=${encodeURIComponent(referer)}" class="btn">Download Master Image</a>
     </div>
   </header>

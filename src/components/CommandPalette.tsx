@@ -42,6 +42,10 @@ interface CommandPaletteProps {
   onExportProjectZip: () => void;
 }
 
+/**
+ * Keyboard-accessible command palette (`Cmd/Ctrl+K`) for switching between the 7 studios
+ * and triggering quick sample, Instagram, nested hub, theme, and project export actions.
+ */
 export const CommandPalette: React.FC<CommandPaletteProps> = ({
   isOpen,
   onClose,
@@ -115,7 +119,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       {
         id: 'action-theme',
         label: `Switch to ${theme === 'dark' ? 'Archival Light' : 'Calibrated Dark'} Theme`,
-        detail: 'Toggle Ultimate Image Processing workspace theme',
+        detail: 'Toggle Ultimate Image Processor workspace theme',
         category: 'Quick Actions',
         icon: theme === 'dark' ? Sun : Moon,
         run: () => {
@@ -197,16 +201,16 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Ultimate Image Processing Command Palette"
+      aria-label="Ultimate Image Processor Command Palette"
       className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-start justify-center pt-[12vh] px-4"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl bg-white dark:bg-[#101218] border border-[#E2DED3] dark:border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden animate-fadeIn"
+        className="w-full max-w-xl bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden animate-fadeIn"
       >
-        <div className="flex items-center gap-3 px-4 py-3.5 border-b border-[#E2DED3] dark:border-white/[0.08]">
-          <Search className="w-4 h-4 text-zinc-400 shrink-0" />
+        <div className="flex items-center gap-3 px-4 py-3.5 border-b border-[#DCE1EB] dark:border-white/[0.08]">
+          <Search className="w-4 h-4 text-slate-400 shrink-0" />
           <input
             ref={inputRef}
             type="text"
@@ -216,13 +220,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               setSelectedIdx(0);
             }}
             placeholder="Jump to a processing studio, run a sample, or switch theme..."
-            className="flex-1 bg-transparent text-sm text-[#141413] dark:text-white placeholder-zinc-400 focus:outline-none"
+            className="flex-1 bg-transparent text-sm text-[#0F141F] dark:text-white placeholder-slate-400 focus:outline-none"
           />
           <button
             type="button"
             onClick={onClose}
             aria-label="Close command palette"
-            className="p-1 rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer"
+            className="p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -230,7 +234,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
         <div className="max-h-[380px] overflow-y-auto p-2 space-y-1">
           {filtered.length === 0 ? (
-            <div className="py-10 text-center text-xs text-zinc-500 dark:text-zinc-400">
+            <div className="py-10 text-center text-xs text-slate-500 dark:text-slate-400">
               No matching studios or actions.
             </div>
           ) : (
@@ -246,7 +250,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-left transition-colors cursor-pointer ${
                     isSelected
                       ? 'bg-blue-600 text-white'
-                      : 'text-[#141413] dark:text-zinc-100 hover:bg-[#F2EFE8] dark:hover:bg-white/[0.05]'
+                      : 'text-[#0F141F] dark:text-slate-100 hover:bg-[#F4F6F9] dark:hover:bg-white/[0.05]'
                   }`}
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -254,7 +258,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
                         isSelected
                           ? 'bg-white/20 text-white'
-                          : 'bg-[#EFECE4] dark:bg-white/[0.06] text-zinc-600 dark:text-zinc-300'
+                          : 'bg-[#EEF1F6] dark:bg-white/[0.06] text-slate-600 dark:text-slate-300'
                       }`}
                     >
                       <Icon className="w-4 h-4" />
@@ -263,7 +267,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       <div className="text-xs font-semibold truncate">{item.label}</div>
                       <div
                         className={`text-[11px] truncate ${
-                          isSelected ? 'text-blue-100' : 'text-zinc-500 dark:text-zinc-400'
+                          isSelected ? 'text-blue-100' : 'text-slate-500 dark:text-slate-400'
                         }`}
                       >
                         {item.detail}
@@ -274,7 +278,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   <div className="flex items-center gap-2 shrink-0">
                     <span
                       className={`text-[10px] font-medium ${
-                        isSelected ? 'text-blue-100' : 'text-zinc-400 dark:text-zinc-500'
+                        isSelected ? 'text-blue-100' : 'text-slate-400 dark:text-slate-500'
                       }`}
                     >
                       {item.category}
@@ -284,7 +288,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                         className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
                           isSelected
                             ? 'bg-white/20 text-white'
-                            : 'bg-[#EFECE4] dark:bg-white/[0.06] text-zinc-500'
+                            : 'bg-[#EEF1F6] dark:bg-white/[0.06] text-slate-500'
                         }`}
                       >
                         {item.shortcut}

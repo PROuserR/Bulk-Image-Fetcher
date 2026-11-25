@@ -19,6 +19,11 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/**
+ * POST /api/scrape/nested
+ * Crawls discovered or user-selected child galleries concurrently (2 at a time), deduplicates
+ * master URLs across sub-galleries, and merges all images with `galleryId`/`galleryTitle` metadata.
+ */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));

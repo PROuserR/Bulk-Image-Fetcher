@@ -172,10 +172,10 @@ const GalleryCard: React.FC<GalleryCardProps> = React.memo(({
   return (
     <article
       onClick={() => onSelectImage(img)}
-      className={`group bg-white dark:bg-[#101218] border rounded-xl overflow-hidden transition-all duration-150 flex flex-col cursor-pointer ${
+      className={`group bg-white dark:bg-[#0E121B] border rounded-xl overflow-hidden transition-all duration-150 flex flex-col cursor-pointer ${
         isSelected
           ? 'border-blue-600 ring-2 ring-blue-600/20 shadow-sm'
-          : 'border-[#E2DED3] dark:border-white/[0.08] hover:border-zinc-400 dark:hover:border-white/25 hover:-translate-y-0.5'
+          : 'border-[#DCE1EB] dark:border-white/[0.08] hover:border-slate-400 dark:hover:border-white/25 hover:-translate-y-0.5'
       }`}
     >
       {/* Thumbnail Viewport */}
@@ -708,16 +708,16 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   return (
     <div className="space-y-5">
       {/* Gallery Header & Filter Workbench */}
-      <section className="bg-white dark:bg-[#101218] border border-[#E2DED3] dark:border-white/[0.08] rounded-2xl p-5 sm:p-6 transition-colors">
+      <section className="bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] rounded-2xl p-5 sm:p-6 transition-colors">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="min-w-0">
-            <h2 className="font-display text-xl sm:text-2xl font-bold text-zinc-950 dark:text-white truncate max-w-2xl">
+            <h2 className="font-display text-xl sm:text-2xl font-bold text-[#0F141F] dark:text-[#F3F6FA] truncate max-w-2xl">
               {pageTitle || 'Extracted Asset Contact Sheet'}
             </h2>
-            <div className="flex items-center gap-2 text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-1 flex-wrap tabular-nums">
+            <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 flex-wrap tabular-nums">
               {nestedGalleries.length > 0 && (
                 <>
-                  <span className="font-semibold text-[#141413] dark:text-zinc-100">
+                  <span className="font-semibold text-[#0F141F] dark:text-slate-100">
                     {nestedGalleries.length} nested {nestedGalleries.length === 1 ? 'gallery' : 'galleries'}
                   </span>
                   <span aria-hidden="true">·</span>
@@ -978,7 +978,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
       </section>
 
       {/* Batch Action Toolbar */}
-      <section className="bg-white dark:bg-[#101218] border border-[#E2DED3] dark:border-white/[0.08] rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 transition-colors">
+      <section className="bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 transition-colors">
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
@@ -1286,12 +1286,12 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
 
       {/* Contact-Sheet Grid (Grouped by Child Gallery or Flat) */}
       {filteredImages.length === 0 ? (
-        <div className="text-center py-16 bg-white dark:bg-[#111319] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-8">
-          <ImageIcon className="w-10 h-10 mx-auto text-zinc-400 mb-3" />
-          <h3 className="text-base font-semibold text-zinc-950 dark:text-white">
+        <div className="text-center py-16 bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] rounded-2xl p-8">
+          <ImageIcon className="w-10 h-10 mx-auto text-slate-400 mb-3" />
+          <h3 className="text-base font-semibold text-[#0F141F] dark:text-white">
             No images match your stacked filters
           </h3>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             {activeFilterCount} filter{activeFilterCount !== 1 ? 's' : ''} active. Remove one or reset the filter stack.
           </p>
           {activeFilterCount > 0 && (
@@ -1311,16 +1311,16 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             const allGroupSelected = section.items.every((i) => selectedIds.has(i.id));
             return (
               <section key={section.id} className="space-y-3.5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-[#E4E0D6] dark:border-white/[0.08]">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-[#DCE1EB] dark:border-white/[0.08]">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-mono text-xs tabular-nums text-zinc-400 shrink-0">
+                      <span className="font-mono text-xs tabular-nums text-slate-400 shrink-0">
                         {String(sIdx + 1).padStart(2, '0')}.
                       </span>
-                      <h3 className="font-display text-base sm:text-lg font-bold text-[#141413] dark:text-white truncate">
+                      <h3 className="font-display text-base sm:text-lg font-bold text-[#0F141F] dark:text-white truncate">
                         {section.title}
                       </h3>
-                      <span className="text-xs font-mono tabular-nums text-zinc-500 dark:text-zinc-400 shrink-0">
+                      <span className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400 shrink-0">
                         · {section.items.length} photos
                       </span>
                     </div>
@@ -1328,7 +1328,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                       href={section.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-[11px] font-mono text-zinc-500 dark:text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 truncate max-w-md mt-0.5"
+                      className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 truncate max-w-md mt-0.5"
                     >
                       <span className="truncate">{section.url}</span>
                       <ExternalLink className="w-2.5 h-2.5 shrink-0" />
@@ -1338,7 +1338,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                   <button
                     type="button"
                     onClick={() => handleToggleSelectGalleryGroup(section.items)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-[#111319] border border-[#E4E0D6] dark:border-white/[0.08] hover:border-blue-500 rounded-lg text-xs font-semibold text-[#141413] dark:text-zinc-200 transition-colors whitespace-nowrap shrink-0 self-start sm:self-center cursor-pointer tabular-nums"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] hover:border-blue-500 rounded-lg text-xs font-semibold text-[#0F141F] dark:text-slate-200 transition-colors whitespace-nowrap shrink-0 self-start sm:self-center cursor-pointer tabular-nums"
                   >
                     {allGroupSelected ? (
                       <CheckSquare className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />

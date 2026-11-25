@@ -1,3 +1,8 @@
+/**
+ * @module directoryImageService
+ * Path-confined server filesystem image scanner and native `sharp` batch processor
+ * backing `/api/crop-resize/*` endpoints.
+ */
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';

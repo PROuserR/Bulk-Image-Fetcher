@@ -27,6 +27,7 @@ import {
   AlertCircle,
   CheckCircle2,
   SlidersHorizontal,
+  Video,
 } from 'lucide-react';
 import { encodeAnimatedGif, GifFrameRgbaInput } from '../utils/gifEncoder';
 import {
@@ -44,6 +45,13 @@ import {
   formatGifDuration,
   fpsToDelayMs,
 } from '../utils/gifMakerLogic';
+import {
+  ClipExtractionPlan,
+  deriveClipBaseFilename,
+  isSupportedVideoFile,
+} from '../utils/videoClipLogic';
+import { ExtractedVideoFrame } from '../utils/videoFrameExtractor';
+import { VideoClipExtractorPanel } from './VideoClipExtractorPanel';
 import { formatBytesCompact } from '../utils/imageTransformLogic';
 import { triggerBlobDownload } from '../utils/downloader';
 import { ScrapedImage } from '../utils/scraperLogic';
@@ -180,6 +188,8 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
   onClearSeeded,
   onNotify,
 }) => {
+  const [sourceMode, setSourceMode] = useState<'frames' | 'video'>('frames');
+  const [queuedVideoFile, setQueuedVideoFile] = useState<File | null>(null);
   const [items, setItems] = useState<GifStudioFrameItem[]>([]);
   const [config, setConfig] = useState<GifMakerConfig>(() => ({ ...DEFAULT_GIF_CONFIG }));
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
@@ -405,13 +415,22 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
   ]);
 
   const ingestFiles = async (fileList: FileList | File[], append = false) => {
-    const rawFiles = Array.from(fileList).filter((f) => {
+    const allFiles = Array.from(fileList);
+    const firstVideo = allFiles.find((f) => isSupportedVideoFile(f));
+    const rawFiles = allFiles.filter((f) => {
       if (f.type && f.type.startsWith('image/')) return true;
       return /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(f.name);
     });
 
+    if (rawFiles.length === 0 && firstVideo) {
+      setErrorMsg(null);
+      setQueuedVideoFile(firstVideo);
+      setSourceMode('video');
+      return;
+    }
+
     if (rawFiles.length === 0) {
-      setErrorMsg('No supported image files found.');
+      setErrorMsg('No supported image or video files found.');
       return;
     }
 
@@ -557,111 +576,180 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
     setConfig((prev) => ({ ...prev, [key]: value }));
   };
 
+  const encodeSequenceToGif = useCallback(
+    async (
+      targetIncludedItems: GifStudioFrameItem[],
+      targetConfig: GifMakerConfig,
+      customBaseName?: string
+    ) => {
+      const targetSteps = buildGifSequence(targetIncludedItems.length, targetConfig);
+      if (targetIncludedItems.length === 0 || targetSteps.length === 0) {
+        setErrorMsg('Include at least one image frame before encoding.');
+        return;
+      }
+
+      const first = targetIncludedItems[0];
+      const targetDims = computeGifCanvasDimensions(
+        targetConfig,
+        first ? { width: first.width, height: first.height } : null
+      );
+
+      setIsEncoding(true);
+      setErrorMsg(null);
+      setEncodeProgress({ done: 0, total: targetSteps.length });
+
+      try {
+        for (const item of targetIncludedItems) {
+          if (!decodedCacheRef.current.has(item.previewUrl)) {
+            const img = await loadHtmlImageForGif(item.previewUrl);
+            decodedCacheRef.current.set(item.previewUrl, img);
+          }
+        }
+
+        const { width, height } = targetDims;
+        const renderCanvas = document.createElement('canvas');
+        renderCanvas.width = width;
+        renderCanvas.height = height;
+        const ctx = renderCanvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) throw new Error('Canvas 2D context is unavailable in this browser.');
+
+        const rgbaFrames: GifFrameRgbaInput[] = [];
+        for (let i = 0; i < targetSteps.length; i++) {
+          const step = targetSteps[i];
+          const primaryItem = targetIncludedItems[step.primaryIndex];
+          const secondaryItem =
+            step.secondaryIndex !== null ? targetIncludedItems[step.secondaryIndex] : null;
+          const primaryImg = decodedCacheRef.current.get(primaryItem.previewUrl);
+          if (!primaryImg) continue;
+          const secondaryImg = secondaryItem
+            ? decodedCacheRef.current.get(secondaryItem.previewUrl) || null
+            : null;
+
+          renderSequenceStepToCanvas(
+            ctx,
+            width,
+            height,
+            targetConfig,
+            primaryImg,
+            secondaryImg,
+            step.blendFactor
+          );
+          const imageData = ctx.getImageData(0, 0, width, height);
+          rgbaFrames.push({
+            rgba: imageData.data,
+            width,
+            height,
+            delayMs: step.delayMs,
+          });
+        }
+
+        if (rgbaFrames.length === 0) {
+          throw new Error('Failed to rasterize any frames for the GIF.');
+        }
+
+        await new Promise((r) => setTimeout(r, 16));
+
+        const gifBytes = encodeAnimatedGif(rgbaFrames, {
+          width,
+          height,
+          loopCount: targetConfig.loopCount,
+          dither: targetConfig.dither,
+          onProgress: (done, total) => {
+            setEncodeProgress({ done, total });
+          },
+        });
+
+        const gifBuffer = new Uint8Array(gifBytes);
+        const blob = new Blob([gifBuffer], { type: 'image/gif' });
+        const url = URL.createObjectURL(blob);
+        const prefix = customBaseName ? deriveClipBaseFilename(customBaseName) : 'ultimate_processor_animated';
+        const filename = `${prefix}_${width}x${height}_${rgbaFrames.length}f.gif`;
+
+        if (generatedGifUrlRef.current) {
+          try {
+            URL.revokeObjectURL(generatedGifUrlRef.current);
+          } catch {
+            // ignore
+          }
+        }
+        generatedGifUrlRef.current = url;
+
+        setGeneratedGif({
+          url,
+          blob,
+          filename,
+          width,
+          height,
+          frameCount: rgbaFrames.length,
+          sizeBytes: blob.size,
+        });
+        setStageMode('output');
+        const summary = `Created ${width}×${height} GIF (${rgbaFrames.length} frames · ${formatBytesCompact(blob.size)})`;
+        setStatusMsg(summary);
+        onNotify?.(summary);
+      } catch (err: unknown) {
+        setErrorMsg(err instanceof Error ? err.message : 'Failed to encode animated GIF.');
+      } finally {
+        setIsEncoding(false);
+        setEncodeProgress(null);
+      }
+    },
+    [onNotify]
+  );
+
   const handleCreateGif = async () => {
-    if (includedItems.length === 0 || sequenceSteps.length === 0) {
-      setErrorMsg('Include at least one image frame before encoding.');
-      return;
+    await encodeSequenceToGif(includedItems, config);
+  };
+
+  const handleVideoFramesExtracted = async (
+    extractedFrames: ExtractedVideoFrame[],
+    plan: ClipExtractionPlan,
+    autoConvertToGif: boolean,
+    sourceName: string
+  ) => {
+    clearObjectUrls();
+    clearGeneratedOutput();
+
+    const nextItems: GifStudioFrameItem[] = [];
+    for (const frame of extractedFrames) {
+      revokableUrlsRef.current.push(frame.objectUrlToRevoke);
+      try {
+        const img = await loadHtmlImageForGif(frame.previewUrl);
+        decodedCacheRef.current.set(frame.previewUrl, img);
+      } catch {
+        // decode lazily if needed
+      }
+      nextItems.push({
+        id: frame.id,
+        filename: frame.filename,
+        previewUrl: frame.previewUrl,
+        objectUrlToRevoke: frame.objectUrlToRevoke,
+        width: frame.width,
+        height: frame.height,
+        sizeBytes: frame.sizeBytes,
+        included: true,
+      });
     }
 
-    setIsEncoding(true);
+    const nextConfig: GifMakerConfig = {
+      ...config,
+      fps: plan.outputGifFps,
+      aspectPreset: 'original',
+      maxEdge: Math.max(config.maxEdge, Math.min(800, extractedFrames[0]?.width || 480)),
+    };
+
+    setItems(nextItems);
+    setConfig(nextConfig);
+    setCurrentStepIndex(0);
+    setIsPlaying(true);
+    setSourceMode('frames');
     setErrorMsg(null);
-    setEncodeProgress({ done: 0, total: sequenceSteps.length });
+    setStatusMsg(
+      `Extracted ${nextItems.length} frames from "${sourceName}" (${plan.clipDurationSec.toFixed(1)}s @ ${plan.outputGifFps} fps).`
+    );
 
-    try {
-      // Ensure every included frame is decoded cleanly
-      for (const item of includedItems) {
-        if (!decodedCacheRef.current.has(item.previewUrl)) {
-          const img = await loadHtmlImageForGif(item.previewUrl);
-          decodedCacheRef.current.set(item.previewUrl, img);
-        }
-      }
-
-      const { width, height } = canvasDimensions;
-      const renderCanvas = document.createElement('canvas');
-      renderCanvas.width = width;
-      renderCanvas.height = height;
-      const ctx = renderCanvas.getContext('2d', { willReadFrequently: true });
-      if (!ctx) throw new Error('Canvas 2D context is unavailable in this browser.');
-
-      const rgbaFrames: GifFrameRgbaInput[] = [];
-      for (let i = 0; i < sequenceSteps.length; i++) {
-        const step = sequenceSteps[i];
-        const primaryItem = includedItems[step.primaryIndex];
-        const secondaryItem =
-          step.secondaryIndex !== null ? includedItems[step.secondaryIndex] : null;
-        const primaryImg = decodedCacheRef.current.get(primaryItem.previewUrl);
-        if (!primaryImg) continue;
-        const secondaryImg = secondaryItem
-          ? decodedCacheRef.current.get(secondaryItem.previewUrl) || null
-          : null;
-
-        renderSequenceStepToCanvas(
-          ctx,
-          width,
-          height,
-          config,
-          primaryImg,
-          secondaryImg,
-          step.blendFactor
-        );
-        const imageData = ctx.getImageData(0, 0, width, height);
-        rgbaFrames.push({
-          rgba: imageData.data,
-          width,
-          height,
-          delayMs: step.delayMs,
-        });
-      }
-
-      if (rgbaFrames.length === 0) {
-        throw new Error('Failed to rasterize any frames for the GIF.');
-      }
-
-      // Yield briefly to paint initial progress indicator cleanly
-      await new Promise((r) => setTimeout(r, 16));
-
-      const gifBytes = encodeAnimatedGif(rgbaFrames, {
-        width,
-        height,
-        loopCount: config.loopCount,
-        dither: config.dither,
-        onProgress: (done, total) => {
-          setEncodeProgress({ done, total });
-        },
-      });
-
-      const gifBuffer = new Uint8Array(gifBytes);
-      const blob = new Blob([gifBuffer], { type: 'image/gif' });
-      const url = URL.createObjectURL(blob);
-      const filename = `fullres_animated_${width}x${height}_${rgbaFrames.length}f.gif`;
-
-      if (generatedGifUrlRef.current) {
-        try {
-          URL.revokeObjectURL(generatedGifUrlRef.current);
-        } catch {
-          // ignore
-        }
-      }
-      generatedGifUrlRef.current = url;
-
-      setGeneratedGif({
-        url,
-        blob,
-        filename,
-        width,
-        height,
-        frameCount: rgbaFrames.length,
-        sizeBytes: blob.size,
-      });
-      setStageMode('output');
-      const summary = `Created ${width}×${height} GIF (${rgbaFrames.length} frames · ${formatBytesCompact(blob.size)})`;
-      setStatusMsg(summary);
-      onNotify?.(summary);
-    } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to encode animated GIF.');
-    } finally {
-      setIsEncoding(false);
-      setEncodeProgress(null);
+    if (autoConvertToGif) {
+      await encodeSequenceToGif(nextItems, nextConfig, sourceName);
     }
   };
 
@@ -705,18 +793,20 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
       />
 
       {/* Studio Top Bar */}
-      <section className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 sm:p-6 transition-colors">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <section className="bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] rounded-2xl p-5 sm:p-6 transition-colors space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2.5">
               <Film className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
-              <h1 className="font-display text-lg sm:text-xl font-bold text-zinc-950 dark:text-white tracking-tight">
-                Animated GIF Studio
+              <h1 className="font-display text-lg sm:text-xl font-bold text-[#0F141F] dark:text-[#F3F6FA] tracking-tight">
+                GIF89a Motion Studio
               </h1>
             </div>
-            <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono tabular-nums">
-              {items.length === 0 ? (
-                <span>Combine local or scraped images into smooth looping GIF89a animations locally</span>
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono tabular-nums">
+              {sourceMode === 'video' ? (
+                <span>Trim a video clip and extract frames or convert directly to animated GIF89a</span>
+              ) : items.length === 0 ? (
+                <span>Build looping GIF89a animations from image sequences or trimmed video clips</span>
               ) : (
                 <>
                   <span>
@@ -735,53 +825,89 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {/* Source Mode Switcher */}
+          <div
+            role="group"
+            aria-label="GIF Source Mode"
+            className="inline-flex items-center self-start md:self-auto p-0.5 bg-[#F4F6F9] dark:bg-[#090C12] border border-[#DCE1EB] dark:border-white/[0.08] rounded-xl shrink-0"
+          >
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isLoadingFiles || isEncoding}
-              className="flex items-center gap-1.5 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+              onClick={() => setSourceMode('frames')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
+                sourceMode === 'frames'
+                  ? 'bg-white dark:bg-[#171E2E] text-[#0F141F] dark:text-white shadow-xs'
+                  : 'text-slate-500 hover:text-[#0F141F] dark:hover:text-slate-200'
+              }`}
             >
               <ImagePlus className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-              <span>{items.length > 0 ? 'Add Images' : 'Select Images'}</span>
+              <span>Image Frames</span>
             </button>
-
             <button
               type="button"
-              onClick={() => folderInputRef.current?.click()}
-              disabled={isLoadingFiles || isEncoding}
-              className="flex items-center gap-1.5 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+              onClick={() => setSourceMode('video')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
+                sourceMode === 'video'
+                  ? 'bg-white dark:bg-[#171E2E] text-[#0F141F] dark:text-white shadow-xs'
+                  : 'text-slate-500 hover:text-[#0F141F] dark:hover:text-slate-200'
+              }`}
             >
-              <FolderOpen className="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-400" />
-              <span>Select Folder</span>
+              <Video className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>Video Clip → GIF</span>
             </button>
+          </div>
+        </div>
 
-            <button
-              type="button"
-              onClick={handleLoadSampleSequence}
-              disabled={isLoadingFiles || isEncoding}
-              className="flex items-center gap-1.5 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 text-zinc-800 dark:text-zinc-200 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-              <span>Load Sample Sequence</span>
-            </button>
+        {sourceMode === 'frames' && (
+          <div className="pt-3 border-t border-[#DCE1EB] dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isLoadingFiles || isEncoding}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F4F6F9] dark:bg-white/[0.06] border border-[#DCE1EB] dark:border-white/[0.08] hover:border-slate-300 dark:hover:border-white/20 text-[#0F141F] dark:text-slate-200 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+              >
+                <ImagePlus className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span>{items.length > 0 ? 'Add Images' : 'Select Images'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => folderInputRef.current?.click()}
+                disabled={isLoadingFiles || isEncoding}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F4F6F9] dark:bg-white/[0.06] border border-[#DCE1EB] dark:border-white/[0.08] hover:border-slate-300 dark:hover:border-white/20 text-[#0F141F] dark:text-slate-200 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
+                <span>Select Folder</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleLoadSampleSequence}
+                disabled={isLoadingFiles || isEncoding}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F4F6F9] dark:bg-white/[0.06] border border-[#DCE1EB] dark:border-white/[0.08] hover:border-blue-500 text-[#0F141F] dark:text-slate-200 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span>Load Sample Sequence</span>
+              </button>
+            </div>
 
             {items.length > 0 && (
               <button
                 type="button"
                 onClick={handleClearAll}
                 disabled={isEncoding}
-                className="flex items-center gap-1.5 px-2.5 py-2 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Clear</span>
+                <span>Clear Timeline</span>
               </button>
             )}
           </div>
-        </div>
+        )}
 
         {(errorMsg || statusMsg) && (
-          <div className="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800/70">
+          <div className="pt-3 border-t border-[#DCE1EB] dark:border-white/[0.08]">
             {errorMsg ? (
               <div className="flex items-center gap-2 text-xs text-rose-600 dark:text-rose-400 font-medium">
                 <AlertCircle className="w-4 h-4 shrink-0" />
@@ -799,8 +925,20 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
         )}
       </section>
 
-      {/* Empty Intake Dropzone */}
-      {items.length === 0 ? (
+      {/* Video Clip Extraction Workbench (kept mounted once opened so loaded video/trim range persists across switches) */}
+      <div className={sourceMode === 'video' ? 'block' : 'hidden'}>
+        <VideoClipExtractorPanel
+          externalVideoFile={queuedVideoFile}
+          onExternalVideoFileConsumed={() => setQueuedVideoFile(null)}
+          onFramesExtracted={handleVideoFramesExtracted}
+          isBusyExternal={isEncoding}
+          onNotify={onNotify}
+        />
+      </div>
+
+      {/* Image Frames Intake or Live Timeline/Stage */}
+      {sourceMode === 'frames' && (
+        items.length === 0 ? (
         <section
           onDragOver={(e) => {
             e.preventDefault();
@@ -814,22 +952,23 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
               ingestFiles(e.dataTransfer.files, false);
             }
           }}
-          className={`bg-white dark:bg-[#111318] border-2 border-dashed rounded-2xl p-10 sm:p-14 text-center transition-colors ${
+          className={`bg-white dark:bg-[#0E121B] border-2 border-dashed rounded-2xl p-10 sm:p-14 text-center transition-colors ${
             isDraggingOver
               ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-950/20'
-              : 'border-zinc-200 dark:border-zinc-800'
+              : 'border-[#DCE1EB] dark:border-white/[0.1]'
           }`}
         >
-          <div className="max-w-md mx-auto flex flex-col items-center">
+          <div className="max-w-lg mx-auto flex flex-col items-center">
             <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200/70 dark:border-blue-800/60 flex items-center justify-center mb-4">
               <Film className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             </div>
-            <h2 className="font-display text-base sm:text-lg font-bold text-zinc-950 dark:text-white">
-              Drop images here to build an animated GIF
+            <h2 className="font-display text-base sm:text-lg font-bold text-[#0F141F] dark:text-[#F3F6FA]">
+              Drop images or a video clip to build an animated GIF
             </h2>
-            <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-1.5 leading-relaxed">
-              Reorder frames, set FPS or boomerang loops, resize to square/16:9/portrait, add
-              crossfades &amp; captions, and export crisp 256-color GIF89a animations locally.
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+              Reorder frames or trim a video clip, set FPS or boomerang loops, resize to
+              square/16:9/portrait, add crossfades &amp; captions, and export crisp 256-color GIF89a
+              animations locally.
             </p>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
               <button
@@ -842,8 +981,16 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
               </button>
               <button
                 type="button"
+                onClick={() => setSourceMode('video')}
+                className="flex items-center gap-2 px-4 py-2.5 bg-[#0F141F] dark:bg-white text-white dark:text-[#0F141F] hover:opacity-90 rounded-xl text-xs font-semibold transition-opacity whitespace-nowrap cursor-pointer"
+              >
+                <Video className="w-4 h-4" />
+                <span>Extract Video Clip → GIF</span>
+              </button>
+              <button
+                type="button"
                 onClick={handleLoadSampleSequence}
-                className="flex items-center gap-2 px-4 py-2.5 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-100 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
+                className="flex items-center gap-2 px-4 py-2.5 bg-[#F4F6F9] dark:bg-white/[0.06] border border-[#DCE1EB] dark:border-white/[0.08] hover:border-blue-500 text-[#0F141F] dark:text-slate-100 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
               >
                 <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                 <span>Try 6-Frame Sample</span>
@@ -869,10 +1016,10 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
                   ingestFiles(e.dataTransfer.files, true);
                 }
               }}
-              className={`bg-white dark:bg-[#111318] border rounded-2xl p-4 sm:p-5 transition-colors ${
+              className={`bg-white dark:bg-[#0E121B] border rounded-2xl p-4 sm:p-5 transition-colors ${
                 isDraggingOver
                   ? 'border-blue-500 ring-2 ring-blue-500/20'
-                  : 'border-zinc-200 dark:border-zinc-800'
+                  : 'border-[#DCE1EB] dark:border-white/[0.08]'
               }`}
             >
               {/* Stage Mode Switch + Live Dimensions */}
@@ -880,15 +1027,15 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
                 <div
                   role="group"
                   aria-label="GIF Stage View"
-                  className="inline-flex items-center p-0.5 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg"
+                  className="inline-flex items-center p-0.5 bg-[#F4F6F9] dark:bg-[#090C12] border border-[#DCE1EB] dark:border-white/[0.08] rounded-lg"
                 >
                   <button
                     type="button"
                     onClick={() => setStageMode('preview')}
                     className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
                       stageMode === 'preview'
-                        ? 'bg-white dark:bg-[#1A1D26] text-zinc-950 dark:text-white shadow-xs'
-                        : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                        ? 'bg-white dark:bg-[#171E2E] text-[#0F141F] dark:text-white shadow-xs'
+                        : 'text-slate-500 hover:text-[#0F141F] dark:hover:text-slate-200'
                     }`}
                   >
                     Live Preview
@@ -899,8 +1046,8 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
                     onClick={() => setStageMode('output')}
                     className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-40 ${
                       stageMode === 'output'
-                        ? 'bg-white dark:bg-[#1A1D26] text-zinc-950 dark:text-white shadow-xs'
-                        : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                        ? 'bg-white dark:bg-[#171E2E] text-[#0F141F] dark:text-white shadow-xs'
+                        : 'text-slate-500 hover:text-[#0F141F] dark:hover:text-slate-200'
                     }`}
                   >
                     {generatedGif
@@ -909,7 +1056,7 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
                   </button>
                 </div>
 
-                <div className="text-xs font-mono tabular-nums text-zinc-500 dark:text-zinc-400">
+                <div className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
                   {stageMode === 'output' && generatedGif
                     ? `${generatedGif.width}×${generatedGif.height} · ${generatedGif.frameCount} frames`
                     : `${canvasDimensions.width}×${canvasDimensions.height} px · ${sequenceSteps.length} steps`}
@@ -917,21 +1064,21 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
               </div>
 
               {/* Visual Canvas or Encoded GIF Output */}
-              <div className="bg-zinc-100/80 dark:bg-[#0B0C10] border border-zinc-200/80 dark:border-zinc-800/80 rounded-xl p-4 flex items-center justify-center min-h-[320px] sm:min-h-[400px]">
+              <div className="bg-[#EEF1F6] dark:bg-[#090C12] border border-[#DCE1EB] dark:border-white/[0.08] rounded-xl p-4 flex items-center justify-center min-h-[320px] sm:min-h-[400px]">
                 {stageMode === 'output' && generatedGif ? (
                   <div className="flex flex-col items-center gap-3">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={generatedGif.url}
                       alt="Generated animated GIF preview"
-                      className="max-w-full max-h-[360px] rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-800 object-contain"
+                      className="max-w-full max-h-[360px] rounded-lg shadow-sm border border-[#DCE1EB] dark:border-white/[0.08] object-contain"
                     />
                   </div>
                 ) : (
                   <canvas
                     ref={previewCanvasRef}
                     aria-label="Animated GIF sequence canvas preview"
-                    className="max-w-full max-h-[360px] rounded-lg shadow-sm border border-zinc-200/80 dark:border-zinc-800/80 object-contain"
+                    className="max-w-full max-h-[360px] rounded-lg shadow-sm border border-[#DCE1EB] dark:border-white/[0.08] object-contain"
                   />
                 )}
               </div>
@@ -1036,13 +1183,13 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
             </section>
 
             {/* Frame Sequence Timeline */}
-            <section className="bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 sm:p-5">
+            <section className="bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] rounded-2xl p-4 sm:p-5">
               <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                 <div>
-                  <h2 className="font-display text-sm font-bold text-zinc-950 dark:text-white">
+                  <h2 className="font-display text-sm font-bold text-[#0F141F] dark:text-[#F3F6FA]">
                     Frame Timeline ({includedItems.length} active)
                   </h2>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     Reorder, duplicate, or exclude frames. Click any frame to jump preview.
                   </p>
                 </div>
@@ -1187,10 +1334,10 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
           </div>
 
           {/* Right Column: Animation & Export Inspector */}
-          <aside className="lg:col-span-4 bg-white dark:bg-[#111318] border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 space-y-5 lg:sticky lg:top-20">
-            <div className="flex items-center gap-2 pb-3 border-b border-zinc-100 dark:border-zinc-800/80">
+          <aside className="lg:col-span-4 bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] rounded-2xl p-5 space-y-5 lg:sticky lg:top-20">
+            <div className="flex items-center gap-2 pb-3 border-b border-[#DCE1EB] dark:border-white/[0.08]">
               <SlidersHorizontal className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-              <h2 className="font-display text-sm font-bold text-zinc-950 dark:text-white">
+              <h2 className="font-display text-sm font-bold text-[#0F141F] dark:text-[#F3F6FA]">
                 Animation Settings
               </h2>
             </div>
@@ -1544,6 +1691,7 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
             </div>
           </aside>
         </div>
+        )
       )}
     </div>
   );

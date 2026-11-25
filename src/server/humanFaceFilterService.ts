@@ -1,11 +1,21 @@
+/**
+ * @module humanFaceFilterService
+ * Server-side multimodal AI pipeline for the "Only Person · Exclude Landscape (AI)" filter.
+ * Downloads or decodes candidate images (with `sharp` magic-byte sanitization and tiny-icon
+ * short-circuiting), batches up to 12 items per Gemini structured-JSON request, and caches
+ * positive/negative face decisions in a 30-minute LRU cache.
+ */
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import sharp from 'sharp';
 import { extractBestImageFromDetailPage } from '@/utils/htmlExtractor';
 import { fetchDetailPageHtmlSmart, resolveImageBufferWithFallbacks } from './fetchHelpers';
 
+/** Primary fast vision model for human-face detection. */
 export const HUMAN_FACE_FILTER_MODEL = 'gemini-3.1-flash-lite';
+/** Fallback vision model used when the primary Gemini endpoint returns transient 429/503 errors. */
 export const HUMAN_FACE_FILTER_FALLBACK_MODEL = 'gemini-4-hydrogen';
 
+/** Input metadata describing a scraped image to evaluate for human faces. */
 export interface HumanFaceScanInput {
   id: string;
   url: string;
@@ -17,6 +27,7 @@ export interface HumanFaceScanInput {
   previewDataUrl?: string;
 }
 
+/** Structured AI face-detection verdict returned per image ID. */
 export interface HumanFaceScanDecision {
   id: string;
   hasHumanFace: boolean;
@@ -55,10 +66,12 @@ interface CachedFaceEntry {
 
 const HUMAN_FACE_CACHE = new Map<string, CachedFaceEntry>();
 
+/** Clears the in-memory human-face detection LRU cache (primarily for test isolation). */
 export function clearHumanFaceFilterCache(): void {
   HUMAN_FACE_CACHE.clear();
 }
 
+/** Returns the current entry count stored in the in-memory human-face LRU cache. */
 export function getHumanFaceFilterCacheStats(): { entries: number } {
   return { entries: HUMAN_FACE_CACHE.size };
 }
@@ -115,6 +128,7 @@ function getGeminiClient(apiKey: string): GoogleGenAI {
   return client;
 }
 
+/** Decodes a `data:image/*;base64,...` URI into a raw `Buffer` and normalized MIME type. */
 export function decodeBase64DataImage(dataUri?: string): { buffer: Buffer; mimeType: string } | null {
   if (!dataUri || typeof dataUri !== 'string') return null;
   const match = dataUri
@@ -132,6 +146,7 @@ export function decodeBase64DataImage(dataUri?: string): { buffer: Buffer; mimeT
   }
 }
 
+/** Inspects file header magic bytes to identify JPEG, PNG, or WebP payloads safely. */
 export function detectSupportedVisionMimeFromBytes(buf: Buffer): string | null {
   if (!buf || buf.byteLength < 12) return null;
   // JPEG: FF D8 FF
@@ -170,6 +185,10 @@ function isSvgOrXmlPayload(buf: Buffer, sourceUrl?: string): boolean {
   return head.startsWith('<svg') || (head.startsWith('<?xml') && head.includes('<svg'));
 }
 
+/**
+ * Downscales arbitrary valid raster image bytes to <=384px JPEG for fast, low-token
+ * vision inspection while skipping HTML error pages, SVGs, and <16px spacer icons.
+ */
 export async function normalizeBufferForFaceVision(
   rawBuffer: Buffer,
   sourceHint?: string
@@ -302,6 +321,7 @@ async function fetchAndNormalizeImageForVision(
   return null;
 }
 
+/** Structured HTTP-aware error thrown by the Gemini human-face filter pipeline. */
 export class HumanFaceFilterError extends Error {
   status: number;
   constructor(message: string, status = 500) {
@@ -310,6 +330,7 @@ export class HumanFaceFilterError extends Error {
   }
 }
 
+/** Maps raw SDK/HTTP errors from Gemini Vision into user-actionable status codes and messages. */
 export function mapGeminiFaceError(err: unknown): HumanFaceFilterError {
   if (err instanceof HumanFaceFilterError) return err;
   const raw = err instanceof Error ? err.message : String(err || 'Gemini AI vision error');

@@ -1,3 +1,9 @@
+/**
+ * @module imageFilterLogic
+ * Pure color grading math, 8 studio color presets, 14 tone/FX adjustments, and 9
+ * face-anchored AR / optical lens definitions shared by the Filter & Lenses Studio,
+ * `canvasFilterRenderer.ts`, and `node:test` suites.
+ */
 export type ColorPresetId =
   | 'original'
   | 'bw_noir'
@@ -20,6 +26,7 @@ export type SnapLensId =
   | 'big_head'
   | 'comic_pop';
 
+/** Full 14-slider non-destructive color, tone, sharpening, blur, vignette, and film-grain state. */
 export interface ImageAdjustmentState {
   brightness: number; // -100 .. 100
   contrast: number; // -100 .. 100

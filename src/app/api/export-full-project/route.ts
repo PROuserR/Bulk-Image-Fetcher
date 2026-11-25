@@ -26,7 +26,7 @@ export async function GET() {
       status: 200,
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="fullres_scraper_full_codebase.zip"',
+        'Content-Disposition': 'attachment; filename="ultimate_image_processor_codebase.zip"',
       },
     });
   } catch (err: any) {

@@ -8,6 +8,11 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/**
+ * POST /api/ai/human-face-filter
+ * Evaluates up to 12 scraped images per batch via Gemini multimodal vision to detect
+ * visible human faces ("Only Person · Exclude Landscape (AI)") with server LRU caching.
+ */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));

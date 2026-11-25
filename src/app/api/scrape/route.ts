@@ -6,6 +6,11 @@ import { scrapeSingleGallery } from '@/server/galleryScraperService';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/**
+ * POST /api/scrape
+ * Extracts full-resolution images from a target webpage URL, Instagram profile,
+ * pasted preview URL batch, raw HTML snippet, or Open-Tab Harvester JSON manifest.
+ */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
