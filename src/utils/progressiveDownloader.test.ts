@@ -74,6 +74,11 @@ test('runProgressiveDownloads processes items concurrently and saves progressive
   assert.equal(result.percent, 100);
   assert.equal(result.bytesSaved, 6 * 1024);
   assert.equal(savedOrder.length, 6);
+  assert.equal(result.checksumEntries.length, 6);
+  for (const entry of result.checksumEntries) {
+    assert.match(entry.sha256, /^[a-f0-9]{64}$/);
+    assert.equal(entry.bytes, 1024);
+  }
   assert.ok(
     progressEvents.includes(1) && progressEvents.includes(3),
     'Expected progressive updates as items finish rather than only at the end'
@@ -243,4 +248,72 @@ test('runProgressiveDownloads supports pause and resuming remaining items later 
     5 - savedFilesPhase1.length,
     'Resumed run should only download remaining unsaved files'
   );
+});
+
+import {
+  clearClientImageCache,
+  registerWorkingPreviewUrl,
+  setCachedImageBlob,
+  buildProxyImageUrl,
+} from './clientImageCache.ts';
+
+test('runProgressiveDownloads reuses memory-cache and preview-http-cache without calling /api/download-file', async () => {
+  clearClientImageCache();
+  const urlMem = 'https://cdn.example.com/already-in-memory.jpg';
+  const urlProxyCached = 'https://cdn.example.com/already-in-http-cache.jpg';
+  const proxyUrl = buildProxyImageUrl(urlProxyCached, 'https://example.com');
+
+  setCachedImageBlob(urlMem, new Blob([new Uint8Array(512)], { type: 'image/jpeg' }));
+  registerWorkingPreviewUrl(urlProxyCached, proxyUrl);
+
+  const requestedUrls: string[] = [];
+  const requestedCacheModes: Array<RequestCache | undefined> = [];
+
+  const mockFetch: FetchLike = async (url, init) => {
+    requestedUrls.push(url);
+    requestedCacheModes.push(init?.cache);
+    return makeMockResponse(768, 'image/jpeg', 200);
+  };
+
+  const result = await runProgressiveDownloads(
+    [
+      { id: 'm1', url: urlMem, filename: 'mem.jpg' },
+      { id: 'p1', url: urlProxyCached, filename: 'proxy.jpg' },
+    ],
+    {
+      concurrency: 2,
+      staggerMs: 0,
+      fetchFn: mockFetch,
+      saveBlobFn: () => {},
+      // Enable cache path explicitly when using custom fetchFn
+    }
+  );
+
+  // Note: runProgressiveDownloads calls fetchImageBlobWithFallbacks without overriding useCache,
+  // so verify direct fetchImageBlobWithFallbacks with useCache: true as well:
+  assert.equal(result.saved, 2);
+
+  clearClientImageCache();
+  setCachedImageBlob(urlMem, new Blob([new Uint8Array(512)], { type: 'image/jpeg' }));
+  registerWorkingPreviewUrl(urlProxyCached, proxyUrl);
+  requestedUrls.length = 0;
+  requestedCacheModes.length = 0;
+
+  const { fetchImageBlobWithFallbacks } = await import('./progressiveDownloader');
+  const r1 = await fetchImageBlobWithFallbacks(
+    { id: 'm1', url: urlMem, filename: 'mem.jpg' },
+    { fetchFn: mockFetch, useCache: true }
+  );
+  const r2 = await fetchImageBlobWithFallbacks(
+    { id: 'p1', url: urlProxyCached, filename: 'proxy.jpg' },
+    { fetchFn: mockFetch, useCache: true }
+  );
+
+  assert.equal(r1.resolvedVia, 'memory-cache');
+  assert.equal(r2.resolvedVia, 'preview-http-cache');
+  assert.deepEqual(requestedUrls, [proxyUrl]);
+  assert.deepEqual(requestedCacheModes, ['force-cache']);
+  assert.ok(!requestedUrls.some((u) => u.startsWith('/api/download-file')));
+
+  clearClientImageCache();
 });

@@ -43,6 +43,7 @@ import {
 import { triggerBlobDownload } from '../utils/downloader';
 import { fetchApiJson } from '../utils/safeFetchJson';
 import { ScrapedImage } from '../utils/scraperLogic';
+import { resolveSeededPreviewUrl } from '../utils/folderGalleryLogic';
 
 export interface StudioDirectoryItem {
   id: string;
@@ -190,7 +191,7 @@ export const CropResizeStudio: React.FC<CropResizeStudioProps> = ({
     const stamp = Date.now();
 
     const immediateItems: StudioDirectoryItem[] = seededScrapedImages.map((srcImg, i) => {
-      const proxied = `/api/proxy?url=${encodeURIComponent(srcImg.fullUrl)}&referer=${encodeURIComponent(seededSourceUrl || '')}`;
+      const proxied = resolveSeededPreviewUrl(srcImg.fullUrl, seededSourceUrl || '');
       const initW = Math.max(1, srcImg.width || 1600);
       const initH = Math.max(1, srcImg.height || 1066);
       const fallbackName = srcImg.filename || `image_${i + 1}.${srcImg.format || 'jpg'}`;

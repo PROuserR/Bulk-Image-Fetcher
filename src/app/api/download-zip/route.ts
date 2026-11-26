@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import pLimit from 'p-limit';
 import { extractBestImageFromDetailPage } from '@/utils/htmlExtractor';
@@ -22,6 +23,7 @@ import {
   buildContentDispositionHeader,
   normalizeArchiveFormat,
 } from '@/utils/downloader';
+import { formatSha256SumsText, type ChecksumEntry } from '@/utils/checksumUtils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -92,6 +94,7 @@ export async function GET(req: NextRequest) {
           'Content-Disposition': buildContentDispositionHeader(meta.filename),
           'X-Archive-Format': meta.format,
           'X-Archive-Count': meta.fileCount.toString(),
+          ...(meta.archiveSha256 ? { 'X-Archive-Sha256': meta.archiveSha256 } : {}),
           'Cache-Control': 'no-store',
         },
       });
@@ -107,6 +110,7 @@ export async function GET(req: NextRequest) {
       'Content-Disposition': buildContentDispositionHeader(meta.filename),
       'X-Archive-Format': meta.format,
       'X-Archive-Count': meta.fileCount.toString(),
+      ...(meta.archiveSha256 ? { 'X-Archive-Sha256': meta.archiveSha256 } : {}),
       'Cache-Control': 'no-store',
     },
   });
@@ -189,6 +193,11 @@ export async function POST(req: NextRequest) {
       return resolved?.url || null;
     };
 
+    interface HashedArchiveEntry {
+      entry: ArchiveEntry;
+      checksum: ChecksumEntry;
+    }
+
     const fetchAllEntries = async (
       onImageDone?: (info: {
         fetchedCount: number;
@@ -198,7 +207,7 @@ export async function POST(req: NextRequest) {
         filename: string;
       }) => void,
       signal?: AbortSignal
-    ): Promise<ArchiveEntry[]> => {
+    ): Promise<HashedArchiveEntry[]> => {
       const limit = pLimit(10);
       let fetchedCount = 0;
       let validCount = 0;
@@ -207,7 +216,7 @@ export async function POST(req: NextRequest) {
 
       const fetchedEntries = await Promise.all(
         plannedTasks.map((task) =>
-          limit(async (): Promise<ArchiveEntry | null> => {
+          limit(async (): Promise<HashedArchiveEntry | null> => {
             if (signal?.aborted) return null;
             const { item, onlyFullRes, rawUrl, uniqueName } = task;
             if (!rawUrl) {
@@ -253,8 +262,21 @@ export async function POST(req: NextRequest) {
             if (result?.buf) {
               validCount++;
               bytesFetched += result.buf.length;
+              const sha256 = crypto.createHash('sha256').update(result.buf).digest('hex');
+              const baseFilename = uniqueName.includes('/')
+                ? uniqueName.slice(uniqueName.lastIndexOf('/') + 1)
+                : uniqueName;
               onImageDone?.({ fetchedCount, totalCount, validCount, bytesFetched, filename: uniqueName });
-              return { path: uniqueName, data: result.buf };
+              return {
+                entry: { path: uniqueName, data: result.buf },
+                checksum: {
+                  filename: baseFilename,
+                  relativePath: uniqueName,
+                  sha256,
+                  bytes: result.buf.length,
+                  url: item.url,
+                },
+              };
             }
 
             onImageDone?.({ fetchedCount, totalCount, validCount, bytesFetched, filename: uniqueName });
@@ -263,7 +285,23 @@ export async function POST(req: NextRequest) {
         )
       );
 
-      return fetchedEntries.filter((entry): entry is ArchiveEntry => entry !== null);
+      return fetchedEntries.filter((item): item is HashedArchiveEntry => item !== null);
+    };
+
+    const appendChecksumManifestEntry = (
+      hashedEntries: HashedArchiveEntry[]
+    ): { entriesForArchive: ArchiveEntry[]; checksumEntries: ChecksumEntry[] } => {
+      const checksumEntries = hashedEntries.map((h) => h.checksum);
+      const manifestText = formatSha256SumsText(checksumEntries, [
+        `Ultimate Image Processor Archive Checksums (${archiveFilename})`,
+        `Images included: ${checksumEntries.length} of ${plannedTasks.length}`,
+        `Verify after extraction with: sha256sum -c SHA256SUMS.txt`,
+      ]);
+      const entriesForArchive: ArchiveEntry[] = [
+        ...hashedEntries.map((h) => h.entry),
+        { path: 'SHA256SUMS.txt', data: Buffer.from(manifestText, 'utf8') },
+      ];
+      return { entriesForArchive, checksumEntries };
     };
 
     if (!streamProgress) {
@@ -278,9 +316,13 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const { buffer, contentType, format } = await buildCompressedArchive(validEntries, archiveFormat, {
-        signal: req.signal,
-      });
+      const { entriesForArchive } = appendChecksumManifestEntry(validEntries);
+      const { buffer, contentType, format } = await buildCompressedArchive(
+        entriesForArchive,
+        archiveFormat,
+        { signal: req.signal }
+      );
+      const archiveSha256 = crypto.createHash('sha256').update(buffer).digest('hex');
 
       return new Response(new Uint8Array(buffer), {
         status: 200,
@@ -290,6 +332,7 @@ export async function POST(req: NextRequest) {
           'Content-Disposition': buildContentDispositionHeader(archiveFilename),
           'X-Archive-Format': format,
           'X-Archive-Count': validEntries.length.toString(),
+          'X-Archive-Sha256': archiveSha256,
           'Cache-Control': 'no-store',
         },
       });
@@ -376,8 +419,11 @@ export async function POST(req: NextRequest) {
             percent: 60,
           });
 
+          const { entriesForArchive, checksumEntries } =
+            appendChecksumManifestEntry(validEntries);
+
           const { buffer, contentType, format } = await buildCompressedArchive(
-            validEntries,
+            entriesForArchive,
             archiveFormat,
             {
               signal: req.signal,
@@ -408,11 +454,13 @@ export async function POST(req: NextRequest) {
             return;
           }
 
+          const archiveSha256 = crypto.createHash('sha256').update(buffer).digest('hex');
           const stagedMeta = await saveStagedArchive(buffer, {
             filename: archiveFilename,
             format,
             contentType,
             fileCount: validEntries.length,
+            archiveSha256,
           });
 
           sendEvent({
@@ -424,6 +472,8 @@ export async function POST(req: NextRequest) {
             totalBytes: stagedMeta.totalBytes,
             fileCount: stagedMeta.fileCount,
             skippedCount: plannedTasks.length - validEntries.length,
+            archiveSha256,
+            checksumEntries,
             percent: 85,
           });
         } catch (err: any) {

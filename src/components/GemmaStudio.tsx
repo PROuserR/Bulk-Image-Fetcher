@@ -32,6 +32,7 @@ import {
 } from '../utils/gemmaCaptionLogic';
 import { triggerBlobDownload, triggerTextDownload } from '../utils/downloader';
 import { ScrapedImage } from '../utils/scraperLogic';
+import { resolveSeededPreviewUrl } from '../utils/folderGalleryLogic';
 
 interface GemmaStudioProps {
   seededScrapedImages?: ScrapedImage[];
@@ -378,7 +379,7 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
       id: `seed_${idx + 1}_${img.id}`,
       filename: img.filename || `scraped_${idx + 1}.jpg`,
       relativePath: img.filename || `scraped_${idx + 1}.jpg`,
-      previewUrl: `/api/proxy?url=${encodeURIComponent(img.fullUrl)}&referer=${encodeURIComponent(seededSourceUrl || '')}`,
+      previewUrl: resolveSeededPreviewUrl(img.fullUrl, seededSourceUrl || ''),
       remoteUrl: img.fullUrl,
       referer: seededSourceUrl,
       sizeBytes: 0,

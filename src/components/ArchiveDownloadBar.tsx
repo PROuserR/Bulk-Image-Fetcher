@@ -11,9 +11,14 @@ import {
   PauseCircle,
   Play,
   X,
+  ShieldCheck,
+  FileDown,
+  Copy,
+  Check,
 } from 'lucide-react';
 import type { ArchiveDownloadProgress } from '../utils/archiveDownloader';
 import { formatBytes } from '../utils/progressiveDownloader';
+import { formatShortSha256 } from '../utils/checksumUtils';
 
 interface ArchiveDownloadBarProps {
   progress: ArchiveDownloadProgress | null;
@@ -21,6 +26,8 @@ interface ArchiveDownloadBarProps {
   onResume?: () => void;
   onCancel?: () => void;
   onDismiss?: () => void;
+  onDownloadChecksum?: () => void;
+  onOpenChecksumVerifier?: () => void;
   compact?: boolean;
 }
 
@@ -45,8 +52,11 @@ export const ArchiveDownloadBar: React.FC<ArchiveDownloadBarProps> = ({
   onResume,
   onCancel,
   onDismiss,
+  onDownloadChecksum,
+  onOpenChecksumVerifier,
   compact = false,
 }) => {
+  const [copiedSha, setCopiedSha] = React.useState(false);
   if (!progress) return null;
 
   const {
@@ -55,12 +65,16 @@ export const ArchiveDownloadBar: React.FC<ArchiveDownloadBarProps> = ({
     stage,
     percent,
     fetchedImages,
+    validImages,
     totalImages,
     bytesLoaded,
     bytesTotal,
     message,
     isRunning,
     isFallback,
+    archiveSha256,
+    checksumEntries,
+    skippedCount,
   } = progress;
 
   const isSuccess = stage === 'complete';
@@ -146,6 +160,37 @@ export const ArchiveDownloadBar: React.FC<ArchiveDownloadBarProps> = ({
                   ({fetchedImages}/{totalImages})
                 </span>
               )}
+              {isSuccess && totalImages > 0 && (
+                <span
+                  className={
+                    (skippedCount ?? 0) > 0
+                      ? 'text-amber-600 dark:text-amber-400 font-semibold'
+                      : 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                  }
+                >
+                  · {validImages}/{totalImages} images verified
+                </span>
+              )}
+              {isSuccess && archiveSha256 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(archiveSha256).then(() => {
+                      setCopiedSha(true);
+                      setTimeout(() => setCopiedSha(false), 1600);
+                    });
+                  }}
+                  title={`Copy full SHA-256: ${archiveSha256}`}
+                  className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                >
+                  <span>SHA-256: {formatShortSha256(archiveSha256)}</span>
+                  {copiedSha ? (
+                    <Check className="w-3 h-3 text-emerald-600" />
+                  ) : (
+                    <Copy className="w-3 h-3" />
+                  )}
+                </button>
+              )}
               {bytesLoaded > 0 && (stage === 'downloading' || stage === 'paused') && bytesTotal && bytesTotal > 0 && (
                 <span>
                   ({formatBytes(bytesLoaded)} / {formatBytes(bytesTotal)})
@@ -208,6 +253,30 @@ export const ArchiveDownloadBar: React.FC<ArchiveDownloadBarProps> = ({
                 >
                   <Play className="w-3.5 h-3.5" />
                   <span>Resume</span>
+                </button>
+              )}
+              {isSuccess && (archiveSha256 || (checksumEntries?.length ?? 0) > 0) && onDownloadChecksum && (
+                <button
+                  type="button"
+                  data-testid="archive-download-checksum-btn"
+                  onClick={onDownloadChecksum}
+                  title={`Download ${filename}.sha256 verification file`}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <FileDown className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span>.sha256</span>
+                </button>
+              )}
+              {isSuccess && onOpenChecksumVerifier && (
+                <button
+                  type="button"
+                  data-testid="archive-verify-checksum-btn"
+                  onClick={onOpenChecksumVerifier}
+                  title="Inspect SHA-256 manifest or verify local files"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/70 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Verify Files</span>
                 </button>
               )}
               {onDismiss && (

@@ -29,6 +29,7 @@ import {
   List,
   AlertCircle,
   ScanFace,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   ScrapedImage,
@@ -55,7 +56,10 @@ import {
 } from '../utils/downloader';
 import {
   buildProxyImageUrl,
+  getOrCreateCachedBlobUrl,
+  getWorkingPreviewUrl,
   registerWorkingPreviewUrl,
+  warmImageBlobCacheFromLoadedPreview,
 } from '../utils/clientImageCache';
 import type { ArchiveDownloadProgress } from '../utils/archiveDownloader';
 import { FullImageLinksModal } from './FullImageLinksModal';
@@ -95,6 +99,7 @@ interface GalleryViewProps {
   onSendToGifMaker?: (targetImages: ScrapedImage[]) => void;
   onSendToHumanClassifier?: (targetImages: ScrapedImage[]) => void;
   onSendToGemmaCaptioner?: (targetImages: ScrapedImage[]) => void;
+  onOpenChecksumVerifier?: (targetImages: ScrapedImage[]) => void;
 }
 
 interface GalleryCardProps {
@@ -129,6 +134,16 @@ const GalleryCard: React.FC<GalleryCardProps> = React.memo(({
         urls.push(u);
       }
     };
+    const cachedBlobUrl = img.fullUrl ? getOrCreateCachedBlobUrl(img.fullUrl) : undefined;
+    if (cachedBlobUrl) {
+      addCandidate(cachedBlobUrl);
+    }
+    const knownWorking = img.fullUrl || img.thumbnailUrl
+      ? getWorkingPreviewUrl(img.fullUrl || img.thumbnailUrl)
+      : undefined;
+    if (knownWorking) {
+      addCandidate(knownWorking);
+    }
     if (img.isUnshrunk) {
       addCandidate(img.fullUrl);
       addCandidate(img.thumbnailUrl);
@@ -191,6 +206,7 @@ const GalleryCard: React.FC<GalleryCardProps> = React.memo(({
         {!isBroken && activeSrc ? (
           <img
             data-face-img-id={img.id}
+            data-full-url={img.fullUrl}
             src={activeSrc}
             alt={img.altText}
             loading={cardIndex < 12 ? 'eager' : 'lazy'}
@@ -205,6 +221,9 @@ const GalleryCard: React.FC<GalleryCardProps> = React.memo(({
               }
               if (activeSrc && (img.fullUrl || img.thumbnailUrl)) {
                 registerWorkingPreviewUrl(img.fullUrl || img.thumbnailUrl, activeSrc);
+                if (img.fullUrl) {
+                  void warmImageBlobCacheFromLoadedPreview(img.fullUrl, activeSrc);
+                }
               }
               onPreviewUpdate(img.id, {
                 status: 'loaded',
@@ -436,6 +455,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   onSendToGifMaker,
   onSendToHumanClassifier,
   onSendToGemmaCaptioner,
+  onOpenChecksumVerifier,
 }) => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filters, setFilters] = useState<GalleryFilterState>(DEFAULT_GALLERY_FILTERS);
@@ -1230,6 +1250,28 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
           >
             Export JSON
           </button>
+
+          {onOpenChecksumVerifier && (
+            <button
+              type="button"
+              data-testid="gallery-checksum-btn"
+              onClick={() => {
+                const targets =
+                  selectedIds.size > 0
+                    ? images.filter((img) => selectedIds.has(img.id))
+                    : filteredImages;
+                onOpenChecksumVerifier(targets);
+              }}
+              disabled={filteredImages.length === 0 && selectedIds.size === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-40"
+              title="Generate SHA-256 download checksums and verify local downloaded files to make sure nothing is missing"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span className="tabular-nums">
+                Checksum ({selectedIds.size > 0 ? selectedIds.size : filteredImages.length})
+              </span>
+            </button>
+          )}
 
           <div className="flex items-center gap-1.5">
             <div

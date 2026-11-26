@@ -90,5 +90,85 @@ test('registerWorkingPreviewUrl and getFullResReusablePreviewUrl guard against t
   registerWorkingPreviewUrl(fullUrl, proxyFull);
   assert.equal(getFullResReusablePreviewUrl(fullUrl), proxyFull);
 
+  // Ephemeral blob: URLs must not overwrite permanent working preview URLs
+  registerWorkingPreviewUrl(fullUrl, 'blob:http://localhost:3000/ephemeral');
+  assert.equal(getWorkingPreviewUrl(fullUrl), proxyFull);
+
   clearClientImageCache();
+});
+
+import {
+  isSameOriginOrLocalImageUrl,
+  isFullResProxyUrl,
+  getOrCreateCachedBlobUrl,
+  warmImageBlobCacheFromLoadedPreview,
+  countReusableBrowserImages,
+} from './clientImageCache.ts';
+
+test('isSameOriginOrLocalImageUrl & isFullResProxyUrl classify local and proxy URLs accurately', () => {
+  assert.equal(isSameOriginOrLocalImageUrl('/api/proxy?url=a'), true);
+  assert.equal(isSameOriginOrLocalImageUrl('/samples/humans/random_001.jpg'), true);
+  assert.equal(isSameOriginOrLocalImageUrl('blob:http://localhost:3000/abc'), true);
+  assert.equal(isSameOriginOrLocalImageUrl('data:image/png;base64,AAA'), true);
+  assert.equal(isSameOriginOrLocalImageUrl('//cdn.example.com/a.jpg'), false);
+  assert.equal(isSameOriginOrLocalImageUrl('https://cdn.example.com/a.jpg'), false);
+
+  const fullUrl = 'https://cdn.example.com/master.jpg';
+  assert.equal(isFullResProxyUrl(buildProxyImageUrl(fullUrl, 'https://site.com'), fullUrl), true);
+  assert.equal(isFullResProxyUrl(buildProxyImageUrl('https://cdn.example.com/thumb.jpg'), fullUrl), false);
+});
+
+test('getOrCreateCachedBlobUrl, countReusableBrowserImages, and warmImageBlobCacheFromLoadedPreview work together', async () => {
+  clearClientImageCache();
+  const urlA = 'https://cdn.example.com/a.jpg';
+  const urlB = 'https://cdn.example.com/b.jpg';
+  const urlC = 'https://cdn.example.com/c.jpg';
+
+  setCachedImageBlob(urlA, new Blob([new Uint8Array(100)], { type: 'image/jpeg' }));
+  const blobUrlA = getOrCreateCachedBlobUrl(urlA);
+  assert.ok(blobUrlA && blobUrlA.startsWith('blob:'));
+  assert.equal(getOrCreateCachedBlobUrl(urlA), blobUrlA, 'Returns stable blob URL on repeated calls');
+
+  const proxyB = buildProxyImageUrl(urlB, 'https://example.com');
+  registerWorkingPreviewUrl(urlB, proxyB);
+
+  const counts = countReusableBrowserImages([
+    { id: '1', fullUrl: urlA },
+    { id: '2', fullUrl: urlB },
+    { id: '3', fullUrl: urlC },
+  ]);
+  assert.equal(counts.total, 3);
+  assert.equal(counts.memoryCount, 1);
+  assert.equal(counts.previewCacheCount, 1);
+  assert.equal(counts.reusableCount, 2);
+
+  // Mock fetch to verify warmImageBlobCacheFromLoadedPreview uses force-cache on same-origin /api/proxy
+  const originalFetch = globalThis.fetch;
+  let fetchedUrl = '';
+  let fetchedCacheMode: RequestCache | undefined;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    fetchedUrl = String(input);
+    fetchedCacheMode = init?.cache;
+    return new Response(new Uint8Array(256).fill(9), {
+      status: 200,
+      headers: { 'content-type': 'image/jpeg' },
+    });
+  }) as typeof fetch;
+
+  try {
+    const warmed = await warmImageBlobCacheFromLoadedPreview(urlB, proxyB);
+    assert.ok(warmed && warmed.size === 256);
+    assert.equal(fetchedUrl, proxyB);
+    assert.equal(fetchedCacheMode, 'force-cache');
+    assert.ok(getCachedImageBlob(urlB));
+
+    // Cross-origin preview URLs must not trigger unsolicited fetch during passive warming
+    fetchedUrl = '';
+    const crossOrigin = await warmImageBlobCacheFromLoadedPreview(urlC, urlC);
+    assert.equal(crossOrigin, null);
+    assert.equal(fetchedUrl, '');
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearClientImageCache();
+  }
 });

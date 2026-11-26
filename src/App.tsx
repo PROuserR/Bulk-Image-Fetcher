@@ -41,23 +41,90 @@ const StudioTabSkeleton = () => (
   </div>
 );
 
-const loadCropResizeStudio = () =>
-  import('./components/CropResizeStudio').then((m) => m.CropResizeStudio);
-const loadFilterStudio = () =>
-  import('./components/FilterStudio').then((m) => m.FilterStudio);
-const loadGifMakerStudio = () =>
-  import('./components/GifMakerStudio').then((m) => m.GifMakerStudio);
-const loadHumanClassifierStudio = () =>
-  import('./components/HumanClassifierStudio').then((m) => m.HumanClassifierStudio);
-const loadGemmaStudio = () =>
-  import('./components/GemmaStudio').then((m) => m.GemmaStudio);
-const loadDeploymentDocs = () =>
-  import('./components/DeploymentDocs').then((m) => m.DeploymentDocs);
-const loadLightboxModal = () =>
-  import('./components/LightboxModal').then((m) => m.LightboxModal);
-const loadCommandPalette = () =>
-  import('./components/CommandPalette').then((m) => m.CommandPalette);
+function StudioChunkFallback({ studioName }: { studioName: string }) {
+  return (
+    <div className="bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] rounded-2xl p-6 space-y-3">
+      <h2 className="font-display text-base font-bold text-[#0F141F] dark:text-[#F3F6FA]">
+        {studioName} updated on server
+      </h2>
+      <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
+        A newer bundle was compiled after this page loaded. Reload to fetch the latest studio module.
+      </p>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="inline-flex items-center px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer"
+      >
+        Reload Studio
+      </button>
+    </div>
+  );
+}
 
+function loadStudioWithRetry<P extends object>(
+  importer: () => Promise<React.ComponentType<P>>,
+  studioName: string
+): () => Promise<React.ComponentType<P>> {
+  return async () => {
+    try {
+      return await importer();
+    } catch {
+      await new Promise((r) => setTimeout(r, 250));
+      try {
+        return await importer();
+      } catch {
+        const Fallback: React.FC<P> = () => <StudioChunkFallback studioName={studioName} />;
+        return Fallback;
+      }
+    }
+  };
+}
+
+const loadFolderGalleryStudio = loadStudioWithRetry(
+  () => import('./components/FolderGalleryStudio').then((m) => m.FolderGalleryStudio),
+  'Folder Gallery'
+);
+const loadCropResizeStudio = loadStudioWithRetry(
+  () => import('./components/CropResizeStudio').then((m) => m.CropResizeStudio),
+  'Crop & Resize'
+);
+const loadFilterStudio = loadStudioWithRetry(
+  () => import('./components/FilterStudio').then((m) => m.FilterStudio),
+  'Filter & Lenses'
+);
+const loadGifMakerStudio = loadStudioWithRetry(
+  () => import('./components/GifMakerStudio').then((m) => m.GifMakerStudio),
+  'GIF89a Motion'
+);
+const loadHumanClassifierStudio = loadStudioWithRetry(
+  () => import('./components/HumanClassifierStudio').then((m) => m.HumanClassifierStudio),
+  'Face & ID Sort'
+);
+const loadGemmaStudio = loadStudioWithRetry(
+  () => import('./components/GemmaStudio').then((m) => m.GemmaStudio),
+  'Gemma 4 Vision'
+);
+const loadDeploymentDocs = loadStudioWithRetry(
+  () => import('./components/DeploymentDocs').then((m) => m.DeploymentDocs),
+  'Setup & Runtime'
+);
+const loadLightboxModal = () =>
+  import('./components/LightboxModal')
+    .then((m) => m.LightboxModal)
+    .catch(() => (() => null) as React.FC<any>);
+const loadCommandPalette = () =>
+  import('./components/CommandPalette')
+    .then((m) => m.CommandPalette)
+    .catch(() => (() => null) as React.FC<any>);
+const loadChecksumVerifierModal = () =>
+  import('./components/ChecksumVerifierModal')
+    .then((m) => m.ChecksumVerifierModal)
+    .catch(() => (() => null) as React.FC<any>);
+
+const FolderGalleryStudio = dynamic(loadFolderGalleryStudio, {
+  ssr: false,
+  loading: StudioTabSkeleton,
+});
 const CropResizeStudio = dynamic(loadCropResizeStudio, {
   ssr: false,
   loading: StudioTabSkeleton,
@@ -90,30 +157,42 @@ const CommandPalette = dynamic(loadCommandPalette, {
   ssr: false,
   loading: () => null,
 });
+const ChecksumVerifierModal = dynamic(loadChecksumVerifierModal, {
+  ssr: false,
+  loading: () => null,
+});
 
 const prefetchedChunks = new Set<WorkspaceTabId>();
 
 function prefetchTabChunk(tab: WorkspaceTabId) {
   if (prefetchedChunks.has(tab)) return;
   prefetchedChunks.add(tab);
+  const run = (loader: () => Promise<unknown>) => {
+    void loader().catch(() => {
+      prefetchedChunks.delete(tab);
+    });
+  };
   switch (tab) {
+    case 'gallery':
+      run(loadFolderGalleryStudio);
+      break;
     case 'crop':
-      void loadCropResizeStudio();
+      run(loadCropResizeStudio);
       break;
     case 'filters':
-      void loadFilterStudio();
+      run(loadFilterStudio);
       break;
     case 'gif':
-      void loadGifMakerStudio();
+      run(loadGifMakerStudio);
       break;
     case 'classifier':
-      void loadHumanClassifierStudio();
+      run(loadHumanClassifierStudio);
       break;
     case 'gemma':
-      void loadGemmaStudio();
+      run(loadGemmaStudio);
       break;
     case 'docs':
-      void loadDeploymentDocs();
+      run(loadDeploymentDocs);
       break;
   }
 }
@@ -128,6 +207,7 @@ import {
   ArchiveFormat,
   DEFAULT_ARCHIVE_FORMAT,
   triggerBlobDownload,
+  triggerTextDownload,
 } from './utils/downloader';
 import {
   downloadCompressedArchiveWithProgress,
@@ -141,6 +221,13 @@ import {
   ProgressiveDownloadProgress,
   DownloadItemInput,
 } from './utils/progressiveDownloader';
+import {
+  buildChecksumManifestFilename,
+  formatArchiveSidecarSha256Text,
+  formatSha256SumsText,
+  type ChecksumEntry,
+} from './utils/checksumUtils';
+import type { ArchiveChecksumMeta } from './components/ChecksumVerifierModal';
 import { ProgressiveDownloadBar } from './components/ProgressiveDownloadBar';
 import { ArchiveDownloadBar } from './components/ArchiveDownloadBar';
 import { fetchApiJson } from './utils/safeFetchJson';
@@ -236,6 +323,13 @@ export default function App() {
     error: string | null;
   }>({ isScanning: false, scanned: 0, total: 0, error: null });
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+  const [checksumModalState, setChecksumModalState] = useState<{
+    isOpen: boolean;
+    images: ScrapedImage[];
+    initialEntries?: ChecksumEntry[];
+    archiveMeta?: ArchiveChecksumMeta | null;
+    initialTab: 'manifest' | 'verify';
+  } | null>(null);
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const directSaveAbortRef = useRef<AbortController | null>(null);
@@ -243,6 +337,7 @@ export default function App() {
   const faceScanAbortRef = useRef<AbortController | null>(null);
   const faceScanMapRef = useRef<Record<string, FaceScanResult>>({});
   const lastDirectSaveImagesRef = useRef<ScrapedImage[]>([]);
+  const lastArchiveImagesRef = useRef<ScrapedImage[]>([]);
   const pausedDirectContextRef = useRef<{
     images: ScrapedImage[];
     sourceUrl: string;
@@ -431,6 +526,7 @@ export default function App() {
       const urlTab = params.get('tab');
       if (
         urlTab === 'scraper' ||
+        urlTab === 'gallery' ||
         urlTab === 'crop' ||
         urlTab === 'filters' ||
         urlTab === 'gif' ||
@@ -450,6 +546,7 @@ export default function App() {
         const params = new URLSearchParams(window.location.search);
         const urlTab = params.get('tab');
         if (
+          urlTab === 'gallery' ||
           urlTab === 'crop' ||
           urlTab === 'filters' ||
           urlTab === 'gif' ||
@@ -588,7 +685,7 @@ export default function App() {
   // Warm Lightbox chunk once gallery cards appear
   useEffect(() => {
     if (images.length > 0) {
-      void loadLightboxModal();
+      void loadLightboxModal().catch(() => {});
     }
   }, [images.length]);
 
@@ -596,12 +693,13 @@ export default function App() {
   useEffect(() => {
     const tabByKey: Record<string, WorkspaceTabId> = {
       '1': 'scraper',
-      '2': 'crop',
-      '3': 'filters',
-      '4': 'gif',
-      '5': 'classifier',
-      '6': 'gemma',
-      '7': 'docs',
+      '2': 'gallery',
+      '3': 'crop',
+      '4': 'filters',
+      '5': 'gif',
+      '6': 'classifier',
+      '7': 'gemma',
+      '8': 'docs',
     };
     const onGlobalKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -1333,7 +1431,13 @@ export default function App() {
         for (let i = 0; i < toScan.length; i += BATCH_SIZE) {
           if (abortController.signal.aborted) return false;
           const chunk = toScan.slice(i, i + BATCH_SIZE);
-          const continued = await sendFaceScanChunk(chunk.map((img) => ({ img })));
+          const preloadedChunk = await Promise.all(
+            chunk.map(async (img) => ({
+              img,
+              previewDataUrl: await tryCaptureBrowserPreviewDataUrl(img),
+            }))
+          );
+          const continued = await sendFaceScanChunk(preloadedChunk);
           if (!continued || abortController.signal.aborted) return false;
 
           scannedSoFar += chunk.length;
@@ -1473,6 +1577,7 @@ export default function App() {
       relayUrl: ctxRelayUrl,
       format,
     };
+    lastArchiveImagesRef.current = selectedImages;
     pausedArchiveContextRef.current = activeContext;
 
     setIsDownloadingZip(true);
@@ -1522,9 +1627,11 @@ export default function App() {
       pausedArchiveResumeRef.current = null;
       pausedArchiveContextRef.current = null;
       clearPersistedArchivePause();
-      const label = result.usedFallback
-        ? `Browser ZIP fallback "${result.filename}" downloaded with ${result.fileCount} full-size images!`
-        : `${result.format.toUpperCase()} package "${result.filename}" downloaded with ${result.fileCount} full-size images!`;
+      const label = result.usedBrowserCache
+        ? `ZIP "${result.filename}" packaged from webpage data (${result.reusedFromCacheCount ?? result.fileCount}/${result.fileCount} reused without re-downloading)!`
+        : result.usedFallback
+          ? `Browser ZIP fallback "${result.filename}" downloaded with ${result.fileCount} full-size images!`
+          : `${result.format.toUpperCase()} package "${result.filename}" downloaded with ${result.fileCount} full-size images!`;
       showToast(label);
     } else if (result.error) {
       pausedArchiveResumeRef.current = null;
@@ -1670,6 +1777,28 @@ export default function App() {
       directSaveAbortRef.current = null;
     }
 
+    if (
+      directoryHandle &&
+      !finalResult.isPaused &&
+      !finalResult.isCancelled &&
+      finalResult.checksumEntries.length > 0
+    ) {
+      try {
+        const sumsText = formatSha256SumsText(finalResult.checksumEntries, [
+          `Ultimate Image Processor Folder Download Checksums`,
+          `Title: ${pageTitle || sourceUrl || 'Gallery'}`,
+          `Saved: ${finalResult.saved} of ${finalResult.total} images`,
+          `Verify locally with: sha256sum -c SHA256SUMS.txt`,
+        ]);
+        const sumsHandle = await directoryHandle.getFileHandle('SHA256SUMS.txt', { create: true });
+        const writable = await sumsHandle.createWritable();
+        await writable.write(new Blob([sumsText], { type: 'text/plain;charset=utf-8' }));
+        await writable.close();
+      } catch {
+        // ignore manifest write failure if folder permission was revoked
+      }
+    }
+
     if (finalResult.isPaused) {
       persistDirectPause(
         finalResult,
@@ -1688,10 +1817,14 @@ export default function App() {
     } else if (finalResult.saved > 0 && finalResult.failed === 0) {
       pausedDirectContextRef.current = null;
       clearPersistedDirectPause();
+      const cacheNote =
+        finalResult.cacheReusedCount > 0
+          ? ` (${finalResult.cacheReusedCount} reused from webpage cache)`
+          : '';
       showToast(
         directoryHandle
-          ? `Saved all ${finalResult.saved} full-size images directly to folder!`
-          : `Progressive direct save completed for ${finalResult.saved} image(s)!`
+          ? `Saved all ${finalResult.saved} full-size images + SHA256SUMS.txt directly to folder${cacheNote}!`
+          : `Progressive direct save completed for ${finalResult.saved} image(s)${cacheNote}!`
       );
     } else if (finalResult.saved > 0) {
       clearPersistedDirectPause();
@@ -1756,6 +1889,84 @@ export default function App() {
       setProgressiveState(null);
     }
   };
+
+  const handleDownloadArchiveChecksum = useCallback(() => {
+    if (!archiveProgress) return;
+    const entries = archiveProgress.checksumEntries || [];
+    if (archiveProgress.archiveSha256) {
+      const sidecarText = formatArchiveSidecarSha256Text({
+        archiveFilename: archiveProgress.filename,
+        archiveSha256: archiveProgress.archiveSha256,
+        totalBytes: archiveProgress.bytesTotal ?? archiveProgress.bytesLoaded,
+        expectedImageCount: archiveProgress.totalImages,
+        entries,
+      });
+      const sidecarName = `${archiveProgress.filename}.sha256`;
+      triggerTextDownload(sidecarText, sidecarName, 'text/plain');
+      showToast(`Downloaded checksum file ${sidecarName}`);
+      return;
+    }
+    if (entries.length > 0) {
+      const manifestName = buildChecksumManifestFilename(pageTitle, sourceUrl, '_SHA256SUMS.sha256');
+      triggerTextDownload(formatSha256SumsText(entries), manifestName, 'text/plain');
+      showToast(`Downloaded checksum manifest ${manifestName}`);
+    }
+  }, [archiveProgress, pageTitle, showToast, sourceUrl]);
+
+  const handleDownloadDirectChecksum = useCallback(() => {
+    if (!progressiveState || progressiveState.checksumEntries.length === 0) return;
+    const manifestName = buildChecksumManifestFilename(pageTitle, sourceUrl, '_SHA256SUMS.sha256');
+    const text = formatSha256SumsText(progressiveState.checksumEntries, [
+      `Ultimate Image Processor Direct Save Checksums`,
+      `Title: ${pageTitle || sourceUrl || 'Gallery'}`,
+      `Saved: ${progressiveState.saved} of ${progressiveState.total} images`,
+      `Verify locally with: sha256sum -c ${manifestName}`,
+    ]);
+    triggerTextDownload(text, manifestName, 'text/plain');
+    showToast(`Downloaded checksum manifest ${manifestName}`);
+  }, [pageTitle, progressiveState, showToast, sourceUrl]);
+
+  const handleOpenArchiveChecksumVerifier = useCallback(() => {
+    if (!archiveProgress) return;
+    const targetImages =
+      lastArchiveImagesRef.current.length > 0 ? lastArchiveImagesRef.current : images;
+    setChecksumModalState({
+      isOpen: true,
+      images: targetImages,
+      initialEntries: archiveProgress.checksumEntries,
+      archiveMeta: {
+        filename: archiveProgress.filename,
+        format: archiveProgress.format,
+        archiveSha256: archiveProgress.archiveSha256,
+        totalBytes: archiveProgress.bytesTotal ?? archiveProgress.bytesLoaded,
+        validImages: archiveProgress.validImages,
+        totalImages: archiveProgress.totalImages,
+      },
+      initialTab: 'verify',
+    });
+  }, [archiveProgress, images]);
+
+  const handleOpenDirectChecksumVerifier = useCallback(() => {
+    if (!progressiveState) return;
+    const targetImages =
+      lastDirectSaveImagesRef.current.length > 0 ? lastDirectSaveImagesRef.current : images;
+    setChecksumModalState({
+      isOpen: true,
+      images: targetImages,
+      initialEntries: progressiveState.checksumEntries,
+      archiveMeta: null,
+      initialTab: 'verify',
+    });
+  }, [images, progressiveState]);
+
+  const handleOpenGalleryChecksumVerifier = useCallback((targetImages: ScrapedImage[]) => {
+    setChecksumModalState({
+      isOpen: true,
+      images: targetImages,
+      archiveMeta: null,
+      initialTab: 'manifest',
+    });
+  }, []);
 
   const handleExportProjectZip = async () => {
     setIsExportingZip(true);
@@ -1906,6 +2117,8 @@ export default function App() {
                     onResume={handleResumeArchiveDownload}
                     onCancel={handleCancelArchiveDownload}
                     onDismiss={handleDismissArchiveDownload}
+                    onDownloadChecksum={handleDownloadArchiveChecksum}
+                    onOpenChecksumVerifier={handleOpenArchiveChecksumVerifier}
                   />
                 )}
 
@@ -1917,6 +2130,8 @@ export default function App() {
                     onResume={handleResumeDirectSave}
                     onCancel={handleCancelDirectSave}
                     onRetryFailed={handleRetryFailedDirectSave}
+                    onDownloadChecksum={handleDownloadDirectChecksum}
+                    onOpenChecksumVerifier={handleOpenDirectChecksumVerifier}
                     onDismiss={handleDismissDirectSave}
                   />
                 )}
@@ -2015,11 +2230,38 @@ export default function App() {
                       setGemmaSeedImages(targets);
                       handleSelectTab('gemma');
                     }}
+                    onOpenChecksumVerifier={handleOpenGalleryChecksumVerifier}
                   />
                 )}
               </div>
 
-              {/* Tab 2: Batch Directory Crop & Resize Studio */}
+              {/* Tab 2: Local Folder Gallery Viewer */}
+              <div
+                id="tabpanel-gallery"
+                role="tabpanel"
+                hidden={activeTab !== 'gallery'}
+                className={activeTab === 'gallery' ? 'block' : 'hidden'}
+              >
+                {visitedTabs.has('gallery') && (
+                  <FolderGalleryStudio
+                    onNotify={showToast}
+                    onSendToCropResize={(targets) => {
+                      setCropSeedImages(targets);
+                      handleSelectTab('crop');
+                    }}
+                    onSendToFilterStudio={(targets) => {
+                      setFilterSeedImages(targets);
+                      handleSelectTab('filters');
+                    }}
+                    onSendToGifMaker={(targets) => {
+                      setGifSeedImages(targets);
+                      handleSelectTab('gif');
+                    }}
+                  />
+                )}
+              </div>
+
+              {/* Tab 3: Batch Directory Crop & Resize Studio */}
               <div
                 id="tabpanel-crop"
                 role="tabpanel"
@@ -2124,6 +2366,26 @@ export default function App() {
               onClose={() => setSelectedImage(null)}
               onNavigate={handleNavigateLightbox}
               onDeepResolve={handleDeepResolve}
+            />
+          )}
+
+          {checksumModalState?.isOpen && (
+            <ChecksumVerifierModal
+              isOpen={checksumModalState.isOpen}
+              onClose={() => setChecksumModalState(null)}
+              images={checksumModalState.images}
+              pageTitle={pageTitle}
+              sourceUrl={sourceUrl}
+              relayUrl={relayUrl}
+              initialEntries={checksumModalState.initialEntries}
+              archiveMeta={checksumModalState.archiveMeta}
+              initialTab={checksumModalState.initialTab}
+              onDownloadMissing={(missingTargets) => {
+                if (missingTargets.length > 0) {
+                  void handleDownloadIndividually(missingTargets);
+                }
+              }}
+              onNotify={showToast}
             />
           )}
 

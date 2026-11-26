@@ -53,6 +53,7 @@ import {
 import { ExtractedVideoFrame } from '../utils/videoFrameExtractor';
 import { VideoClipExtractorPanel } from './VideoClipExtractorPanel';
 import { formatBytesCompact } from '../utils/imageTransformLogic';
+import { resolveSeededPreviewUrl } from '../utils/folderGalleryLogic';
 import { triggerBlobDownload } from '../utils/downloader';
 import { ScrapedImage } from '../utils/scraperLogic';
 
@@ -276,7 +277,7 @@ export const GifMakerStudio: React.FC<GifMakerStudioProps> = ({
     const seeded: GifStudioFrameItem[] = seededScrapedImages.map((srcImg, idx) => ({
       id: `scraped_gif_${stamp}_${idx}`,
       filename: srcImg.filename || `frame_${String(idx + 1).padStart(2, '0')}.jpg`,
-      previewUrl: `/api/proxy?url=${encodeURIComponent(srcImg.fullUrl)}&referer=${encodeURIComponent(seededSourceUrl || '')}`,
+      previewUrl: resolveSeededPreviewUrl(srcImg.fullUrl, seededSourceUrl || ''),
       width: Math.max(1, srcImg.width || 800),
       height: Math.max(1, srcImg.height || 800),
       sizeBytes: 0,

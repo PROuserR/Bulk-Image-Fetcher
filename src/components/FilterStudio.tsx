@@ -52,6 +52,7 @@ import {
 } from '../utils/imageTransformLogic';
 import { triggerBlobDownload } from '../utils/downloader';
 import { ScrapedImage } from '../utils/scraperLogic';
+import { resolveSeededPreviewUrl } from '../utils/folderGalleryLogic';
 
 interface FilterStudioItem {
   id: string;
@@ -190,7 +191,7 @@ export const FilterStudio: React.FC<FilterStudioProps> = ({
     if (!seededScrapedImages || seededScrapedImages.length === 0) return;
     const stamp = Date.now();
     const seeded: FilterStudioItem[] = seededScrapedImages.map((srcImg, i) => {
-      const proxied = `/api/proxy?url=${encodeURIComponent(srcImg.fullUrl)}&referer=${encodeURIComponent(seededSourceUrl || '')}`;
+      const proxied = resolveSeededPreviewUrl(srcImg.fullUrl, seededSourceUrl || '');
       return {
         id: `scraped_filter_${stamp}_${i}`,
         filename: srcImg.filename || `image_${i + 1}.${srcImg.format || 'jpg'}`,

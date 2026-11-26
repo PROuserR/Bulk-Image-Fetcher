@@ -42,6 +42,7 @@ export interface StagedArchiveMetadata {
   contentType: string;
   totalBytes: number;
   fileCount: number;
+  archiveSha256?: string;
   createdAt: number;
 }
 

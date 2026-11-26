@@ -15,6 +15,8 @@ import {
   Pause,
   PauseCircle,
   Play,
+  ShieldCheck,
+  FileDown,
 } from 'lucide-react';
 import { ProgressiveDownloadProgress, formatBytes } from '../utils/progressiveDownloader';
 
@@ -25,6 +27,8 @@ interface ProgressiveDownloadBarProps {
   onResume?: () => void;
   onCancel: () => void;
   onRetryFailed: () => void;
+  onDownloadChecksum?: () => void;
+  onOpenChecksumVerifier?: () => void;
   onDismiss: () => void;
 }
 
@@ -35,6 +39,8 @@ export const ProgressiveDownloadBar: React.FC<ProgressiveDownloadBarProps> = ({
   onResume,
   onCancel,
   onRetryFailed,
+  onDownloadChecksum,
+  onOpenChecksumVerifier,
   onDismiss,
 }) => {
   const [showFailures, setShowFailures] = useState(false);
@@ -53,11 +59,13 @@ export const ProgressiveDownloadBar: React.FC<ProgressiveDownloadBarProps> = ({
     isPaused,
     isCancelled,
     failedItems,
+    checksumEntries,
   } = progress;
 
   const hasFailures = failed > 0;
   const remaining = Math.max(0, total - saved - failed);
   const isCompleteSuccess = !isRunning && !isPaused && !isCancelled && !hasFailures && saved > 0;
+  const hasChecksums = (checksumEntries?.length ?? 0) > 0;
 
   return (
     <section
@@ -193,6 +201,30 @@ export const ProgressiveDownloadBar: React.FC<ProgressiveDownloadBarProps> = ({
                     )}
                   </button>
                 </>
+              )}
+              {hasChecksums && onDownloadChecksum && (
+                <button
+                  type="button"
+                  data-testid="direct-download-checksum-btn"
+                  onClick={onDownloadChecksum}
+                  title="Download SHA256SUMS (.sha256) checksum manifest for downloaded images"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <FileDown className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span>.sha256</span>
+                </button>
+              )}
+              {hasChecksums && onOpenChecksumVerifier && (
+                <button
+                  type="button"
+                  data-testid="direct-verify-checksum-btn"
+                  onClick={onOpenChecksumVerifier}
+                  title="Verify local downloaded folder against SHA-256 checksums"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/70 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Verify Files</span>
+                </button>
               )}
               <button
                 type="button"

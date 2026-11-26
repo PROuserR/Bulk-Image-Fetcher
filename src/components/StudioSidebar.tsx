@@ -8,6 +8,7 @@
 import React from 'react';
 import {
   Globe,
+  Images,
   Crop,
   Wand2,
   Film,
@@ -42,12 +43,21 @@ export const STUDIO_NAV_ITEMS: StudioNavEntry[] = [
     icon: Globe,
   },
   {
+    id: 'gallery',
+    label: 'Folder Gallery',
+    compactLabel: 'Gallery',
+    subtitle: 'Pick folder, zoom & sort',
+    group: 'Capture & Ingestion',
+    shortcut: '2',
+    icon: Images,
+  },
+  {
     id: 'crop',
     label: 'Crop & Resize',
     compactLabel: 'Crop',
     subtitle: 'Aspect ratios & batch trim',
     group: 'Processing & Vision',
-    shortcut: '2',
+    shortcut: '3',
     icon: Crop,
   },
   {
@@ -56,7 +66,7 @@ export const STUDIO_NAV_ITEMS: StudioNavEntry[] = [
     compactLabel: 'Filters',
     subtitle: 'Color grading & AR lenses',
     group: 'Processing & Vision',
-    shortcut: '3',
+    shortcut: '4',
     icon: Wand2,
   },
   {
@@ -65,7 +75,7 @@ export const STUDIO_NAV_ITEMS: StudioNavEntry[] = [
     compactLabel: 'GIF',
     subtitle: 'Video clips, frames & loops',
     group: 'Processing & Vision',
-    shortcut: '4',
+    shortcut: '5',
     icon: Film,
   },
   {
@@ -74,7 +84,7 @@ export const STUDIO_NAV_ITEMS: StudioNavEntry[] = [
     compactLabel: 'Classifier',
     subtitle: 'Identity clustering & sort',
     group: 'Processing & Vision',
-    shortcut: '5',
+    shortcut: '6',
     icon: Users,
   },
   {
@@ -83,7 +93,7 @@ export const STUDIO_NAV_ITEMS: StudioNavEntry[] = [
     compactLabel: 'Gemma 4',
     subtitle: 'Multimodal caption & chat',
     group: 'Processing & Vision',
-    shortcut: '6',
+    shortcut: '7',
     icon: Sparkles,
   },
   {
@@ -92,7 +102,7 @@ export const STUDIO_NAV_ITEMS: StudioNavEntry[] = [
     compactLabel: 'Setup',
     subtitle: 'REST API, OpenAPI & deploy',
     group: 'Environment',
-    shortcut: '7',
+    shortcut: '8',
     icon: BookOpen,
   },
 ];
@@ -238,7 +248,7 @@ export const StudioSidebar: React.FC<StudioSidebarProps> = ({
       {/* Clean Studio Info Footer */}
       <div className="px-4 py-3 border-t border-[#DCE1EB] dark:border-white/[0.08] text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
         <span>Ultimate Processor</span>
-        <span className="font-mono tabular-nums">7 studios</span>
+        <span className="font-mono tabular-nums">8 studios</span>
       </div>
     </aside>
   );

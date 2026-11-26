@@ -4,9 +4,11 @@
  */
 
 import {
+  captureFullResBlobFromLoadedDomImage,
   dedupeImageBlobFetch,
   getCachedImageBlob,
   getFullResReusablePreviewUrl,
+  isSameOriginOrLocalImageUrl,
 } from './clientImageCache';
 
 export interface DownloadUrlOptions {
@@ -23,7 +25,11 @@ export function triggerBlobDownload(blob: Blob, filename: string): void {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 5000);
+  setTimeout(() => {
+    if (typeof window !== 'undefined' && window.URL?.revokeObjectURL) {
+      window.URL.revokeObjectURL(blobUrl);
+    }
+  }, 5000);
 }
 
 export function triggerTextDownload(
@@ -200,15 +206,19 @@ export async function downloadFileToDisk(
     // Fast-path 1: Reuse already-loaded full-res preview via browser HTTP cache
     const cachedPreviewUrl = getFullResReusablePreviewUrl(url);
     if (cachedPreviewUrl) {
-      const cacheInit: RequestInit & { timeoutMs?: number } =
-        cachedPreviewUrl.startsWith('/api/')
-          ? { cache: 'force-cache', timeoutMs: 6000 }
-          : { mode: 'cors', cache: 'force-cache', timeoutMs: 6000 };
+      const isLocal = isSameOriginOrLocalImageUrl(cachedPreviewUrl);
+      const cacheInit: RequestInit & { timeoutMs?: number } = isLocal
+        ? { cache: 'force-cache', timeoutMs: 6000 }
+        : { mode: 'cors', cache: 'force-cache', timeoutMs: 6000 };
       const reused = await fetchValidImageBlob(cachedPreviewUrl, cacheInit);
       if (reused) return reused;
     }
 
-    // Strategy 2: Same-origin attachment proxy (supports Referer, linkedPageUrl, fallbackUrl, relayUrl)
+    // Fast-path 2: Harvest directly from already-loaded full-res DOM <img> element
+    const domBlob = await captureFullResBlobFromLoadedDomImage(url);
+    if (domBlob) return domBlob;
+
+    // Strategy 3: Same-origin attachment proxy (supports Referer, linkedPageUrl, fallbackUrl, relayUrl)
     const downloadUrl = buildDownloadFileUrl(url, filename, referer, options);
     const proxyBlob = await fetchValidImageBlob(downloadUrl, { timeoutMs: 12000 });
     if (proxyBlob) return proxyBlob;

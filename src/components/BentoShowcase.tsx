@@ -16,6 +16,7 @@ import {
   Sparkles,
   Users,
   ScanFace,
+  Images,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import prismShowcaseImg from '../assets/images/bento_prism_grading_1795633735516.jpg';
@@ -57,16 +58,27 @@ export const BentoShowcase: React.FC<BentoShowcaseProps> = ({
           </p>
         </div>
 
-        {onRunNatureSample && (
+        <div className="flex flex-wrap items-center gap-3 self-start sm:self-auto">
           <button
             type="button"
-            onClick={onRunNatureSample}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline self-start sm:self-auto whitespace-nowrap cursor-pointer"
+            onClick={() => onSelectTab('gallery')}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0F141F] dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 whitespace-nowrap cursor-pointer"
           >
-            <span>Try Extraction Demo</span>
-            <ArrowUpRight className="w-3.5 h-3.5" />
+            <Images className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+            <span>Open Folder Gallery</span>
           </button>
-        )}
+
+          {onRunNatureSample && (
+            <button
+              type="button"
+              onClick={onRunNatureSample}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap cursor-pointer"
+            >
+              <span>Try Extraction Demo</span>
+              <ArrowUpRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Asymmetric Bento Grid */}

@@ -22,8 +22,10 @@ import {
 } from '../utils/downloader';
 import {
   buildProxyImageUrl,
+  getOrCreateCachedBlobUrl,
   getWorkingPreviewUrl,
   registerWorkingPreviewUrl,
+  warmImageBlobCacheFromLoadedPreview,
 } from '../utils/clientImageCache';
 
 interface LightboxModalProps {
@@ -56,6 +58,10 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
     const pushUnique = (u?: string) => {
       if (u && !urls.includes(u)) urls.push(u);
     };
+    const cachedBlobUrl = getOrCreateCachedBlobUrl(image.fullUrl);
+    if (cachedBlobUrl) {
+      pushUnique(cachedBlobUrl);
+    }
     const knownWorking = getWorkingPreviewUrl(image.fullUrl);
     if (knownWorking) {
       pushUnique(knownWorking);
@@ -170,6 +176,7 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
               style={{ transform: `scale(${zoomLevel})` }}
             >
               <img
+                data-full-url={image.fullUrl}
                 src={displayedSrc}
                 alt={image.altText}
                 referrerPolicy="no-referrer"
@@ -183,6 +190,7 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
                   setIsImageLoading(false);
                   if (!showComparison && activeFullSrc) {
                     registerWorkingPreviewUrl(image.fullUrl, activeFullSrc);
+                    void warmImageBlobCacheFromLoadedPreview(image.fullUrl, activeFullSrc);
                   }
                 }}
                 onError={advanceFallback}
@@ -396,7 +404,10 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
                 download={image.filename}
                 onClick={(e) => {
                   e.preventDefault();
-                  downloadFileToDisk(image.fullUrl, image.filename, sourcePageUrl || '');
+                  downloadFileToDisk(image.fullUrl, image.filename, sourcePageUrl || '', {
+                    fallbackUrl: image.fallbackUrl,
+                    linkedPageUrl: image.linkedPageUrl,
+                  });
                 }}
                 className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg transition-colors"
               >

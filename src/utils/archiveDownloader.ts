@@ -12,8 +12,19 @@ import {
   normalizeArchiveFormat,
   triggerBlobDownload,
 } from './downloader';
-import { fetchImageBlobWithFallbacks, formatBytes } from './progressiveDownloader';
+import {
+  fetchImageBlobWithFallbacks,
+  formatBytes,
+  isCacheResolvedVia,
+  type FetchLike,
+} from './progressiveDownloader';
+import { countReusableBrowserImages } from './clientImageCache';
 import { sanitizeGalleryFolderName } from './nestedGalleryLogic';
+import {
+  computeSha256Hex,
+  formatSha256SumsText,
+  type ChecksumEntry,
+} from './checksumUtils';
 import type { ScrapedImage } from './scraperLogic';
 
 export type ArchiveDownloadStage =
@@ -40,6 +51,8 @@ export interface ResumableArchiveState {
   fetchedImages: number;
   validImages: number;
   totalImages: number;
+  archiveSha256?: string;
+  checksumEntries?: ChecksumEntry[];
 }
 
 export interface ArchiveDownloadProgress {
@@ -56,6 +69,11 @@ export interface ArchiveDownloadProgress {
   isRunning: boolean;
   isPaused?: boolean;
   isFallback?: boolean;
+  usedBrowserCache?: boolean;
+  reusedFromCacheCount?: number;
+  archiveSha256?: string;
+  checksumEntries?: ChecksumEntry[];
+  skippedCount?: number;
   error?: string | null;
 }
 
@@ -67,6 +85,8 @@ export interface DownloadCompressedArchiveOptions {
   format?: ArchiveFormat;
   onlyFullRes?: boolean;
   signal?: AbortSignal;
+  fetchFn?: FetchLike;
+  saveBlobFn?: (blob: Blob, filename: string) => void;
   resumeState?: ResumableArchiveState | null;
   onPauseSnapshot?: (snapshot: ResumableArchiveState) => void;
   onProgress?: (progress: ArchiveDownloadProgress) => void;
@@ -81,6 +101,11 @@ export interface ArchiveDownloadResult {
   fileCount: number;
   totalBytes: number;
   usedFallback?: boolean;
+  usedBrowserCache?: boolean;
+  reusedFromCacheCount?: number;
+  archiveSha256?: string;
+  checksumEntries?: ChecksumEntry[];
+  skippedCount?: number;
   error?: string;
 }
 
@@ -233,6 +258,8 @@ export async function downloadCompressedArchiveWithProgress(
     relayUrl = '',
     onlyFullRes = true,
     signal,
+    fetchFn,
+    saveBlobFn,
     resumeState,
     onPauseSnapshot,
     onProgress,
@@ -288,6 +315,9 @@ export async function downloadCompressedArchiveWithProgress(
     totalBytes: number;
     fileCount: number;
     format: ArchiveFormat;
+    archiveSha256?: string;
+    checksumEntries?: ChecksumEntry[];
+    skippedCount?: number;
   } | null = null;
 
   let transferChunks: Uint8Array<ArrayBuffer>[] = [];
@@ -302,15 +332,20 @@ export async function downloadCompressedArchiveWithProgress(
       totalBytes: resumeState.totalBytes || 0,
       fileCount: resumeState.fileCount,
       format: resumeState.format,
+      archiveSha256: resumeState.archiveSha256,
+      checksumEntries: resumeState.checksumEntries,
     };
     transferChunks = [...(resumeState.receivedChunks || [])];
     transferBytesLoaded = resumeState.bytesLoaded || 0;
   }
 
   let serverError: string | null = null;
+  const cacheStats =
+    !readyPayload && format === 'zip' ? countReusableBrowserImages(images) : null;
+  const shouldPackageLocallyFromCache = Boolean(cacheStats && cacheStats.reusableCount > 0);
 
-  // Phase 1 & 2: Server streaming NDJSON (skipped if resuming Phase 3 token!)
-  if (!readyPayload) {
+  // Phase 1 & 2: Server streaming NDJSON (skipped when resuming token or packaging browser-cached .ZIP!)
+  if (!readyPayload && !shouldPackageLocallyFromCache) {
     emit({
       stage: 'connecting',
       percent: Math.max(1, resumeState?.percent ?? 1),
@@ -404,6 +439,13 @@ export async function downloadCompressedArchiveWithProgress(
                 totalBytes: Number(evt.totalBytes || 0),
                 fileCount: Number(evt.fileCount || images.length),
                 format: normalizeArchiveFormat(evt.format || format),
+                archiveSha256:
+                  typeof evt.archiveSha256 === 'string' ? evt.archiveSha256 : undefined,
+                checksumEntries: Array.isArray(evt.checksumEntries)
+                  ? (evt.checksumEntries as ChecksumEntry[])
+                  : undefined,
+                skippedCount:
+                  typeof evt.skippedCount === 'number' ? evt.skippedCount : undefined,
               };
               emit({
                 stage: 'downloading',
@@ -413,6 +455,9 @@ export async function downloadCompressedArchiveWithProgress(
                 validImages: readyPayload.fileCount,
                 bytesLoaded: 0,
                 bytesTotal: readyPayload.totalBytes,
+                archiveSha256: readyPayload.archiveSha256,
+                checksumEntries: readyPayload.checksumEntries,
+                skippedCount: readyPayload.skippedCount,
                 message: `Starting .${formatUpper} download (${formatBytes(readyPayload.totalBytes)})...`,
               });
             } else if (evt.stage === 'error') {
@@ -461,6 +506,9 @@ export async function downloadCompressedArchiveWithProgress(
             }
           );
           if (resData.blob.size > 0) {
+            const archiveSha256 =
+              response.headers.get('x-archive-sha256') ||
+              (await computeSha256Hex(resData.blob).catch(() => undefined));
             triggerBlobDownload(resData.blob, archiveFilename);
             emit({
               stage: 'complete',
@@ -469,6 +517,7 @@ export async function downloadCompressedArchiveWithProgress(
               validImages: images.length,
               bytesLoaded: resData.blob.size,
               bytesTotal: resData.blob.size,
+              archiveSha256,
               isRunning: false,
               isPaused: false,
               message: `Downloaded ${archiveFilename} (${formatBytes(resData.blob.size)})`,
@@ -479,6 +528,7 @@ export async function downloadCompressedArchiveWithProgress(
               format,
               fileCount: images.length,
               totalBytes: resData.blob.size,
+              archiveSha256,
             };
           }
         }
@@ -624,6 +674,10 @@ export async function downloadCompressedArchiveWithProgress(
 
       const finalBlob = new Blob(activeChunkBuffer, { type: readyPayload.contentType });
       if (finalBlob.size > 0) {
+        const computedArchiveSha =
+          readyPayload.archiveSha256 ||
+          fileResp.headers.get('x-archive-sha256') ||
+          (await computeSha256Hex(finalBlob).catch(() => undefined));
         triggerBlobDownload(finalBlob, readyPayload.filename);
         cleanupStagedArchiveToken(readyPayload.token);
         emit({
@@ -634,6 +688,9 @@ export async function downloadCompressedArchiveWithProgress(
           validImages: readyPayload.fileCount,
           bytesLoaded: finalBlob.size,
           bytesTotal: finalBlob.size,
+          archiveSha256: computedArchiveSha,
+          checksumEntries: readyPayload.checksumEntries,
+          skippedCount: readyPayload.skippedCount ?? Math.max(0, images.length - readyPayload.fileCount),
           isRunning: false,
           isPaused: false,
           message: `Downloaded ${readyPayload.filename} (${formatBytes(finalBlob.size)})`,
@@ -644,6 +701,9 @@ export async function downloadCompressedArchiveWithProgress(
           format: readyPayload.format,
           fileCount: readyPayload.fileCount,
           totalBytes: finalBlob.size,
+          archiveSha256: computedArchiveSha,
+          checksumEntries: readyPayload.checksumEntries,
+          skippedCount: readyPayload.skippedCount ?? Math.max(0, images.length - readyPayload.fileCount),
         };
       }
       throw new Error('Downloaded archive file was empty');
@@ -668,6 +728,8 @@ export async function downloadCompressedArchiveWithProgress(
           fetchedImages: images.length,
           validImages: readyPayload.fileCount,
           totalImages: images.length,
+          archiveSha256: readyPayload.archiveSha256,
+          checksumEntries: readyPayload.checksumEntries,
         });
         emit({
           stage: 'paused',
@@ -755,22 +817,28 @@ export async function downloadCompressedArchiveWithProgress(
   }
 
   const fallbackFilename = buildArchiveFilename(pageTitle, sourceUrl, 'zip');
+  const isCacheFirstZip = shouldPackageLocallyFromCache;
   try {
     emit({
       format: 'zip',
       filename: fallbackFilename,
       stage: 'fetching',
       percent: 2,
-      isFallback: true,
-      message: serverError
-        ? `Switching to browser .ZIP fallback (0/${images.length})...`
-        : `Fetching images in browser (0/${images.length})...`,
+      isFallback: !isCacheFirstZip,
+      usedBrowserCache: isCacheFirstZip,
+      reusedFromCacheCount: 0,
+      message: isCacheFirstZip
+        ? `Reusing ${cacheStats?.reusableCount ?? 0}/${images.length} loaded webpage images for .ZIP...`
+        : serverError
+          ? `Switching to browser .ZIP fallback (0/${images.length})...`
+          : `Fetching images in browser (0/${images.length})...`,
     });
 
     const clientZip = new JSZip();
     const seenByFolder = new Map<string, Set<string>>();
     let addedCount = 0;
     let bytesFetched = 0;
+    let reusedFromCacheCount = 0;
 
     const resolvedPaths = images.map((img, overallIdx) => {
       const folderKey = img.galleryTitle
@@ -803,6 +871,7 @@ export async function downloadCompressedArchiveWithProgress(
     let cursor = 0;
     let completed = 0;
     const workerCount = Math.min(6, resolvedPaths.length);
+    const checksumByIndex: Array<ChecksumEntry | null> = new Array(resolvedPaths.length).fill(null);
 
     await Promise.all(
       Array.from({ length: workerCount }, async () => {
@@ -811,7 +880,7 @@ export async function downloadCompressedArchiveWithProgress(
           if (idx >= resolvedPaths.length) break;
           const { img, uniqueName, zipEntryPath } = resolvedPaths[idx];
 
-          const { blob: imageBlob } = await fetchImageBlobWithFallbacks(
+          const { blob: imageBlob, resolvedVia } = await fetchImageBlobWithFallbacks(
             {
               id: img.id || `zip-${idx}`,
               url: img.fullUrl,
@@ -822,15 +891,32 @@ export async function downloadCompressedArchiveWithProgress(
               relayUrl: relayUrl.trim() || undefined,
             },
             {
+              fetchFn,
               timeoutMs: 12000,
               signal,
+              useCache: true,
             }
           );
 
           if (imageBlob && imageBlob.size > 0) {
+            const sha256 = await computeSha256Hex(imageBlob).catch(() => '');
             clientZip.file(zipEntryPath, imageBlob, { compression: 'STORE' });
+            if (sha256) {
+              checksumByIndex[idx] = {
+                id: img.id,
+                filename: uniqueName,
+                relativePath: zipEntryPath,
+                sha256,
+                bytes: imageBlob.size,
+                url: img.fullUrl,
+                resolvedVia,
+              };
+            }
             addedCount++;
             bytesFetched += imageBlob.size;
+            if (isCacheResolvedVia(resolvedVia)) {
+              reusedFromCacheCount++;
+            }
           }
           completed++;
           const fetchPct = Math.min(70, Math.max(2, Math.round(2 + (completed / resolvedPaths.length) * 68)));
@@ -842,8 +928,12 @@ export async function downloadCompressedArchiveWithProgress(
             fetchedImages: completed,
             validImages: addedCount,
             bytesLoaded: bytesFetched,
-            isFallback: true,
-            message: `Browser fallback: fetching ${completed}/${resolvedPaths.length} (${formatBytes(bytesFetched)})`,
+            isFallback: !isCacheFirstZip,
+            usedBrowserCache: isCacheFirstZip || reusedFromCacheCount > 0,
+            reusedFromCacheCount,
+            message: isCacheFirstZip
+              ? `Reading webpage data (${completed}/${resolvedPaths.length} · ${reusedFromCacheCount} cached · ${formatBytes(bytesFetched)})`
+              : `Browser fallback: fetching ${completed}/${resolvedPaths.length} (${formatBytes(bytesFetched)})`,
           });
         }
       })
@@ -869,7 +959,9 @@ export async function downloadCompressedArchiveWithProgress(
         stage: 'paused',
         isRunning: false,
         isPaused: true,
-        isFallback: true,
+        isFallback: !isCacheFirstZip,
+        usedBrowserCache: isCacheFirstZip || reusedFromCacheCount > 0,
+        reusedFromCacheCount,
         message: `Paused at ${latestProgress.percent}% · Ready to resume later`,
       });
       return {
@@ -879,7 +971,9 @@ export async function downloadCompressedArchiveWithProgress(
         format: 'zip',
         fileCount: 0,
         totalBytes: 0,
-        usedFallback: true,
+        usedFallback: !isCacheFirstZip,
+        usedBrowserCache: isCacheFirstZip || reusedFromCacheCount > 0,
+        reusedFromCacheCount,
       };
     }
 
@@ -890,7 +984,9 @@ export async function downloadCompressedArchiveWithProgress(
         stage: 'cancelled',
         isRunning: false,
         isPaused: false,
-        isFallback: true,
+        isFallback: !isCacheFirstZip,
+        usedBrowserCache: isCacheFirstZip || reusedFromCacheCount > 0,
+        reusedFromCacheCount,
         message: 'Archive download cancelled',
       });
       return {
@@ -900,7 +996,9 @@ export async function downloadCompressedArchiveWithProgress(
         format: 'zip',
         fileCount: 0,
         totalBytes: 0,
-        usedFallback: true,
+        usedFallback: !isCacheFirstZip,
+        usedBrowserCache: isCacheFirstZip || reusedFromCacheCount > 0,
+        reusedFromCacheCount,
       };
     }
 
@@ -911,6 +1009,16 @@ export async function downloadCompressedArchiveWithProgress(
       );
     }
 
+    const checksumEntries = checksumByIndex.filter((c): c is ChecksumEntry => c !== null);
+    if (checksumEntries.length > 0) {
+      const sumsText = formatSha256SumsText(checksumEntries, [
+        `Ultimate Image Processor Archive Checksums (${fallbackFilename})`,
+        `Images included: ${checksumEntries.length} of ${resolvedPaths.length}`,
+        `Verify after extraction with: sha256sum -c SHA256SUMS.txt`,
+      ]);
+      clientZip.file('SHA256SUMS.txt', sumsText, { compression: 'DEFLATE' });
+    }
+
     emit({
       format: 'zip',
       filename: fallbackFilename,
@@ -919,8 +1027,14 @@ export async function downloadCompressedArchiveWithProgress(
       fetchedImages: resolvedPaths.length,
       validImages: addedCount,
       bytesLoaded: bytesFetched,
-      isFallback: true,
-      message: 'Generating browser .ZIP archive (0%)...',
+      isFallback: !isCacheFirstZip,
+      usedBrowserCache: isCacheFirstZip || reusedFromCacheCount > 0,
+      reusedFromCacheCount,
+      checksumEntries,
+      skippedCount: Math.max(0, resolvedPaths.length - addedCount),
+      message: isCacheFirstZip
+        ? 'Packaging .ZIP from cached webpage images (0%)...'
+        : 'Generating browser .ZIP archive (0%)...',
     });
 
     const zipBlob = await clientZip.generateAsync(
@@ -936,13 +1050,23 @@ export async function downloadCompressedArchiveWithProgress(
           fetchedImages: resolvedPaths.length,
           validImages: addedCount,
           bytesLoaded: bytesFetched,
-          isFallback: true,
-          message: `Generating browser .ZIP archive (${compPct}%)`,
+          isFallback: !isCacheFirstZip,
+          usedBrowserCache: isCacheFirstZip || reusedFromCacheCount > 0,
+          reusedFromCacheCount,
+          message: isCacheFirstZip
+            ? `Packaging .ZIP from cached webpage images (${compPct}%)`
+            : `Generating browser .ZIP archive (${compPct}%)`,
         });
       }
     );
 
-    triggerBlobDownload(zipBlob, fallbackFilename);
+    const archiveSha256 = await computeSha256Hex(zipBlob).catch(() => undefined);
+
+    if (saveBlobFn) {
+      saveBlobFn(zipBlob, fallbackFilename);
+    } else {
+      triggerBlobDownload(zipBlob, fallbackFilename);
+    }
     emit({
       format: 'zip',
       filename: fallbackFilename,
@@ -953,7 +1077,12 @@ export async function downloadCompressedArchiveWithProgress(
       bytesLoaded: zipBlob.size,
       bytesTotal: zipBlob.size,
       isRunning: false,
-      isFallback: true,
+      isFallback: !isCacheFirstZip,
+      usedBrowserCache: isCacheFirstZip || reusedFromCacheCount > 0,
+      reusedFromCacheCount,
+      archiveSha256,
+      checksumEntries,
+      skippedCount: Math.max(0, resolvedPaths.length - addedCount),
       message: `Downloaded ${fallbackFilename} (${formatBytes(zipBlob.size)})`,
     });
 
@@ -963,7 +1092,12 @@ export async function downloadCompressedArchiveWithProgress(
       format: 'zip',
       fileCount: addedCount,
       totalBytes: zipBlob.size,
-      usedFallback: true,
+      usedFallback: !isCacheFirstZip,
+      usedBrowserCache: isCacheFirstZip || reusedFromCacheCount > 0,
+      reusedFromCacheCount,
+      archiveSha256,
+      checksumEntries,
+      skippedCount: Math.max(0, resolvedPaths.length - addedCount),
     };
   } catch (err: any) {
     const errMsg = err?.message || 'Batch download failed';

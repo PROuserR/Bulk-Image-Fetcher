@@ -7,10 +7,22 @@
  */
 import { buildDownloadFileUrl, triggerBlobDownload } from './downloader';
 import {
+  captureFullResBlobFromLoadedDomImage,
   dedupeImageBlobFetch,
   getCachedImageBlob,
   getFullResReusablePreviewUrl,
+  isSameOriginOrLocalImageUrl,
+  setCachedImageBlob,
 } from './clientImageCache';
+import { computeSha256Hex, type ChecksumEntry } from './checksumUtils';
+
+export function isCacheResolvedVia(via?: string): boolean {
+  return (
+    via === 'memory-cache' ||
+    via === 'preview-http-cache' ||
+    via === 'dom-preview-cache'
+  );
+}
 
 /** Target image descriptor supplied to the progressive download queue. */
 export interface DownloadItemInput {
@@ -35,6 +47,7 @@ export interface FailedDownloadItem {
 export interface ItemProgressEntry {
   status: DownloadItemStatus;
   bytes?: number;
+  sha256?: string;
   error?: string;
   resolvedVia?: string;
 }
@@ -47,6 +60,7 @@ export interface ProgressiveDownloadProgress {
   activeCount: number;
   percent: number;
   bytesSaved: number;
+  cacheReusedCount: number;
   currentItems: string[];
   isRunning: boolean;
   isPaused: boolean;
@@ -54,6 +68,7 @@ export interface ProgressiveDownloadProgress {
   savedItemIds: string[];
   failedItems: FailedDownloadItem[];
   itemStatuses: Record<string, ItemProgressEntry>;
+  checksumEntries: ChecksumEntry[];
 }
 
 export type FetchLike = (
@@ -75,6 +90,7 @@ export interface ProgressiveDownloadOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   initialProgress?: ProgressiveResumeState;
+  skipChecksum?: boolean;
   fetchFn?: FetchLike;
   saveBlobFn?: SaveBlobLike;
   onProgress?: (progress: ProgressiveDownloadProgress) => void;
@@ -186,7 +202,8 @@ export async function fetchImageBlobWithFallbacks(
     if (shouldUseCache && item.url) {
       const cachedPreviewUrl = getFullResReusablePreviewUrl(item.url);
       if (cachedPreviewUrl) {
-        const cacheInit: RequestInit = cachedPreviewUrl.startsWith('/api/')
+        const isLocal = isSameOriginOrLocalImageUrl(cachedPreviewUrl);
+        const cacheInit: RequestInit = isLocal
           ? { cache: 'force-cache' }
           : { mode: 'cors', cache: 'force-cache' };
         const cacheAttempt = await fetchValidBlobWithTimeout(
@@ -203,6 +220,14 @@ export async function fetchImageBlobWithFallbacks(
         if (signal?.aborted) {
           lastError = 'Cancelled';
           return null;
+        }
+      }
+
+      if (!options.fetchFn) {
+        const domBlob = await captureFullResBlobFromLoadedDomImage(item.url, item.id);
+        if (domBlob) {
+          resolvedViaResult = 'dom-preview-cache';
+          return domBlob;
         }
       }
     }
@@ -268,12 +293,8 @@ export async function fetchImageBlobWithFallbacks(
       : await executeFetch();
 
   if (blob) {
-    if (shouldUseCache && item.url && resolvedViaResult !== 'memory-cache') {
-      // dedupeImageBlobFetch already caches when !signal; ensure cached when signal was passed
-      if (signal) {
-        const { setCachedImageBlob } = await import('./clientImageCache');
-        setCachedImageBlob(item.url, blob);
-      }
+    if (shouldUseCache && item.url && resolvedViaResult !== 'memory-cache' && signal) {
+      setCachedImageBlob(item.url, blob);
     }
     return { blob, resolvedVia: resolvedViaResult || 'cache' };
   }
@@ -343,6 +364,27 @@ export async function runProgressiveDownloads(
   const buildSnapshot = (isRunning: boolean): ProgressiveDownloadProgress => {
     const completed = saved + failed;
     const percent = total === 0 ? 100 : Math.round((completed / total) * 100);
+    let cacheReusedCount = 0;
+    const checksumEntries: ChecksumEntry[] = [];
+    for (const item of items) {
+      const entry = itemStatuses[item.id];
+      if (entry?.status === 'saved') {
+        if (isCacheResolvedVia(entry.resolvedVia)) {
+          cacheReusedCount++;
+        }
+        if (entry.sha256) {
+          checksumEntries.push({
+            id: item.id,
+            filename: item.filename,
+            relativePath: item.filename,
+            sha256: entry.sha256,
+            bytes: entry.bytes ?? 0,
+            url: item.url,
+            resolvedVia: entry.resolvedVia,
+          });
+        }
+      }
+    }
     return {
       total,
       completed,
@@ -351,6 +393,7 @@ export async function runProgressiveDownloads(
       activeCount: activeSet.size,
       percent,
       bytesSaved,
+      cacheReusedCount,
       currentItems: Array.from(activeSet),
       isRunning,
       isPaused: !isRunning && isPausedSignal(),
@@ -358,6 +401,7 @@ export async function runProgressiveDownloads(
       savedItemIds: Array.from(savedItemIdsSet),
       failedItems: [...failedItems],
       itemStatuses: { ...itemStatuses },
+      checksumEntries,
     };
   };
 
@@ -428,6 +472,9 @@ export async function runProgressiveDownloads(
 
       if (blob && blob.size > 0) {
         try {
+          const sha256 = options.skipChecksum
+            ? undefined
+            : await computeSha256Hex(blob).catch(() => undefined);
           await enqueueDiskSave(blob, item.filename);
           if (signal?.aborted) {
             itemStatuses[item.id] = isPausedSignal()
@@ -441,6 +488,7 @@ export async function runProgressiveDownloads(
           itemStatuses[item.id] = {
             status: 'saved',
             bytes: blob.size,
+            sha256,
             resolvedVia,
           };
         } catch (saveErr: any) {

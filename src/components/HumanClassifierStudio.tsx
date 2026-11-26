@@ -38,6 +38,7 @@ import {
 import { triggerBlobDownload } from '../utils/downloader';
 import { fetchApiJson } from '../utils/safeFetchJson';
 import { ScrapedImage } from '../utils/scraperLogic';
+import { resolveSeededPreviewUrl } from '../utils/folderGalleryLogic';
 
 interface ClassifierImageItem {
   id: string;
@@ -201,7 +202,7 @@ export const HumanClassifierStudio: React.FC<HumanClassifierStudioProps> = ({
     clearRevokableUrls();
     const stamp = Date.now();
     const imported: ClassifierImageItem[] = seededScrapedImages.slice(0, 200).map((img, idx) => {
-      const proxied = `/api/proxy?url=${encodeURIComponent(img.fullUrl)}&referer=${encodeURIComponent(seededSourceUrl || '')}`;
+      const proxied = resolveSeededPreviewUrl(img.fullUrl, seededSourceUrl || '');
       const fname = img.filename || `scraped_${idx + 1}.${img.format || 'jpg'}`;
       return {
         id: `scraped_${stamp}_${idx}`,

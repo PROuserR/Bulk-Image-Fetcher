@@ -11,6 +11,7 @@ import brandLogoImg from '../assets/images/ultimate_processor_logo_1795552441344
 
 export type WorkspaceTabId =
   | 'scraper'
+  | 'gallery'
   | 'crop'
   | 'filters'
   | 'gif'
@@ -31,6 +32,7 @@ interface HeaderProps {
 
 const TAB_LABELS: Record<WorkspaceTabId, string> = {
   scraper: 'Capture Studio',
+  gallery: 'Folder Gallery',
   crop: 'Crop & Resize',
   filters: 'Filter & Lenses',
   gif: 'GIF89a Motion',
@@ -41,6 +43,7 @@ const TAB_LABELS: Record<WorkspaceTabId, string> = {
 
 const MOBILE_TABS: { id: WorkspaceTabId; label: string }[] = [
   { id: 'scraper', label: 'Capture' },
+  { id: 'gallery', label: 'Gallery' },
   { id: 'crop', label: 'Crop' },
   { id: 'filters', label: 'Filters' },
   { id: 'gif', label: 'GIF89a' },

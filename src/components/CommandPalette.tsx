@@ -15,6 +15,7 @@ import {
   Sparkles,
   Instagram,
   FolderTree,
+  FolderOpen,
   X,
 } from 'lucide-react';
 import { WorkspaceTabId } from './Header';
@@ -43,8 +44,8 @@ interface CommandPaletteProps {
 }
 
 /**
- * Keyboard-accessible command palette (`Cmd/Ctrl+K`) for switching between the 7 studios
- * and triggering quick sample, Instagram, nested hub, theme, and project export actions.
+ * Keyboard-accessible command palette (`Cmd/Ctrl+K`) for switching between the 8 studios
+ * and triggering quick sample, folder gallery, Instagram, nested hub, theme, and project export actions.
  */
 export const CommandPalette: React.FC<CommandPaletteProps> = ({
   isOpen,
@@ -85,6 +86,17 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         run: () => {
           onSelectTab('scraper');
           onRunNatureSample();
+          onClose();
+        },
+      },
+      {
+        id: 'action-open-folder-gallery',
+        label: 'Open Local Folder Gallery',
+        detail: 'Browse a local folder with zooming, sorting, masonry & lightbox',
+        category: 'Quick Actions',
+        icon: FolderOpen,
+        run: () => {
+          onSelectTab('gallery');
           onClose();
         },
       },

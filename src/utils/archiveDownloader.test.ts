@@ -53,3 +53,104 @@ test('formatArchiveStatusLine shows clear percentage and stage across lifecycle'
     'Cancelled .ZIP (42%)'
   );
 });
+
+import {
+  downloadCompressedArchiveWithProgress,
+} from './archiveDownloader.ts';
+import {
+  clearClientImageCache,
+  setCachedImageBlob,
+  registerWorkingPreviewUrl,
+  buildProxyImageUrl,
+} from './clientImageCache.ts';
+
+test('downloadCompressedArchiveWithProgress packages browser-cached images into .ZIP without calling /api/download-zip', async () => {
+  clearClientImageCache();
+  const url1 = 'https://cdn.example.com/cached-1.jpg';
+  const url2 = 'https://cdn.example.com/cached-2.jpg';
+  const proxy2 = buildProxyImageUrl(url2, 'https://example.com');
+
+  setCachedImageBlob(url1, new Blob([new Uint8Array(256).fill(1)], { type: 'image/jpeg' }));
+  registerWorkingPreviewUrl(url2, proxy2);
+
+  const prevFetch = globalThis.fetch;
+  let serverZipCalls = 0;
+  let savedZipName = '';
+  let savedZipBlob: Blob | null = null;
+  const clientFetchUrls: string[] = [];
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const u = String(input);
+    if (u.includes('/api/download-zip')) serverZipCalls++;
+    return new Response(null, { status: 500 });
+  }) as typeof fetch;
+
+  try {
+    const result = await downloadCompressedArchiveWithProgress({
+      images: [
+        {
+          id: '1',
+          fullUrl: url1,
+          thumbnailUrl: url1,
+          filename: 'cached-1.jpg',
+          altText: 'Cached 1',
+          format: 'jpg',
+          resolutionTier: 'hd',
+          isUnshrunk: true,
+          unshrinkMethod: 'Direct Master',
+        },
+        {
+          id: '2',
+          fullUrl: url2,
+          thumbnailUrl: url2,
+          filename: 'cached-2.jpg',
+          altText: 'Cached 2',
+          format: 'jpg',
+          resolutionTier: 'hd',
+          isUnshrunk: true,
+          unshrinkMethod: 'Direct Master',
+        },
+      ],
+      pageTitle: 'Cached Gallery',
+      sourceUrl: 'https://example.com',
+      format: 'zip',
+      saveBlobFn: (blob, filename) => {
+        savedZipName = filename;
+        savedZipBlob = blob;
+      },
+      fetchFn: async (u) => {
+        clientFetchUrls.push(u);
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'image/jpeg' }),
+          blob: async () => new Blob([new Uint8Array(320).fill(2)], { type: 'image/jpeg' }),
+        };
+      },
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.format, 'zip');
+    assert.equal(result.fileCount, 2);
+    assert.equal(result.usedBrowserCache, true);
+    assert.equal(result.reusedFromCacheCount, 2);
+    assert.equal(savedZipName, 'Cached Gallery.zip');
+    assert.ok(savedZipBlob && savedZipBlob.size > 0);
+    assert.match(result.archiveSha256 || '', /^[a-f0-9]{64}$/);
+    assert.equal(result.checksumEntries?.length, 2);
+    assert.equal(serverZipCalls, 0, 'Must not call /api/download-zip when webpage images are already cached');
+    assert.deepEqual(clientFetchUrls, [proxy2], 'Only non-RAM preview-cached image reads from force-cache proxy');
+
+    const JSZipMod = (await import('jszip')).default;
+    const loadedZip = await JSZipMod.loadAsync(await savedZipBlob!.arrayBuffer());
+    const manifestFile = loadedZip.file('SHA256SUMS.txt');
+    assert.ok(manifestFile, 'Expected SHA256SUMS.txt embedded inside archive');
+    const manifestText = await manifestFile!.async('string');
+    assert.ok(manifestText.includes(result.checksumEntries![0].sha256));
+    assert.ok(manifestText.includes('cached-1.jpg'));
+    assert.ok(manifestText.includes('cached-2.jpg'));
+  } finally {
+    globalThis.fetch = prevFetch;
+    clearClientImageCache();
+  }
+});
