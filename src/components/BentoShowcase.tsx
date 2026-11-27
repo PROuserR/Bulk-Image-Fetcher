@@ -45,20 +45,29 @@ export const BentoShowcase: React.FC<BentoShowcaseProps> = ({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-      aria-label="Ultimate Image Processor Modules"
+      aria-label="FrameVault Studio Modules"
       className="space-y-4"
     >
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 px-1">
         <div>
           <h2 className="font-display text-lg sm:text-xl font-bold text-[#0F141F] dark:text-[#F3F6FA] tracking-tight">
-            Ultimate Image Processor Pipeline
+            FrameVault Studio Pipeline
           </h2>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-            Load local folders or pipe extracted masters directly into AI face isolation, color grading, batch geometry, and motion synthesis.
+            Capture full-resolution media, browse local folders, or generate with local diffusion models—then grade, crop, and verify in one workstation.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 self-start sm:self-auto">
+        <div className="flex flex-wrap lg:flex-nowrap items-center gap-3 self-start sm:self-auto shrink-0">
+          <button
+            type="button"
+            onClick={() => onSelectTab('generate')}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0F141F] dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 whitespace-nowrap cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+            <span>AI Image Gen</span>
+          </button>
+
           <button
             type="button"
             onClick={() => onSelectTab('gallery')}

@@ -262,7 +262,7 @@ open("ultimate_archive.7z", "wb").write(archive.content)`;
               <span>Consumer REST API, OpenAPI 3.1 &amp; Codebase Deployment</span>
             </div>
             <h2 className="text-2xl font-display font-bold text-[#0F141F] dark:text-slate-50 tracking-tight">
-              Ultimate Image Processor API &amp; Self-Hosting
+              FrameVault API &amp; Self-Hosting
             </h2>
             <p className="text-sm text-slate-600 dark:text-slate-400 mt-2 leading-relaxed">
               Consume extraction, AI human-face isolation, stateless <code className="font-mono text-xs">/api/process</code> image grading, and LZMA2 <code className="font-mono text-xs">.7z</code> packaging programmatically via REST, or download the complete Next.js 16 source tree.

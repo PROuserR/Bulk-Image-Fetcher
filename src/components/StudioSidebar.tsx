@@ -14,11 +14,12 @@ import {
   Film,
   Users,
   Sparkles,
+  ImagePlus,
   BookOpen,
   Command,
 } from 'lucide-react';
 import { WorkspaceTabId } from './Header';
-import brandLogoImg from '../assets/images/ultimate_processor_logo_1795552441344.jpg';
+import brandLogoImg from '../assets/images/framevault_logo_1795790818624.jpg';
 
 /** Navigation descriptor for each studio rail entry and Cmd/Ctrl+K command item. */
 export interface StudioNavEntry {
@@ -97,12 +98,21 @@ export const STUDIO_NAV_ITEMS: StudioNavEntry[] = [
     icon: Sparkles,
   },
   {
+    id: 'generate',
+    label: 'AI Image Gen',
+    compactLabel: 'Generate',
+    subtitle: 'Local SD, ComfyUI & MOSS',
+    group: 'Processing & Vision',
+    shortcut: '8',
+    icon: ImagePlus,
+  },
+  {
     id: 'docs',
     label: 'Setup & Runtime',
     compactLabel: 'Setup',
     subtitle: 'REST API, OpenAPI & deploy',
     group: 'Environment',
-    shortcut: '8',
+    shortcut: '9',
     icon: BookOpen,
   },
 ];
@@ -130,8 +140,8 @@ export const StudioSidebar: React.FC<StudioSidebarProps> = ({
 }) => {
   return (
     <aside
-      aria-label="Ultimate Image Processor Studios"
-      className="hidden md:flex md:w-[240px] lg:w-[260px] shrink-0 flex-col bg-white/95 dark:bg-[#0A0D14]/95 backdrop-blur-md border-r border-[#DCE1EB] dark:border-white/[0.08] sticky top-0 h-screen select-none transition-colors"
+      aria-label="FrameVault Studios"
+      className="hidden md:flex md:w-[240px] lg:w-[260px] shrink-0 flex-col bg-white/95 dark:bg-[#0B0D12]/95 backdrop-blur-md border-r border-[#DCE1EB] dark:border-white/[0.08] sticky top-0 h-screen select-none transition-colors"
     >
       {/* Top Brand Wordmark */}
       <div className="h-14 px-4.5 flex items-center justify-between gap-2 border-b border-[#DCE1EB] dark:border-white/[0.08]">
@@ -139,19 +149,22 @@ export const StudioSidebar: React.FC<StudioSidebarProps> = ({
           type="button"
           onClick={() => onSelectTab('scraper')}
           className="flex items-center gap-2.5 text-[#0F141F] dark:text-[#F3F6FA] hover:opacity-85 transition-opacity cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 rounded-md min-w-0"
-          aria-label="Ultimate Image Processor Home"
+          aria-label="FrameVault Home"
         >
-          <span className="w-8 h-8 rounded-lg overflow-hidden shrink-0 border border-black/15 dark:border-white/15 bg-[#090C12]">
+          <span className="w-8 h-8 rounded-lg overflow-hidden shrink-0 border border-black/15 dark:border-white/15 bg-[#0B0D12]">
             <img
               src={brandLogoImg.src}
-              alt="Ultimate Image Processor logo"
+              alt="FrameVault logo"
               referrerPolicy="no-referrer"
               className="w-full h-full object-cover"
             />
           </span>
           <span className="flex flex-col text-left leading-none min-w-0">
-            <span className="font-display font-bold text-[13.5px] leading-[1.15] tracking-tight whitespace-normal">
-              Ultimate Image Processor
+            <span className="font-display font-bold text-[15px] leading-[1.1] tracking-tight whitespace-nowrap">
+              FrameVault
+            </span>
+            <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 whitespace-nowrap">
+              Calibrated Studio
             </span>
           </span>
         </button>
@@ -247,8 +260,8 @@ export const StudioSidebar: React.FC<StudioSidebarProps> = ({
 
       {/* Clean Studio Info Footer */}
       <div className="px-4 py-3 border-t border-[#DCE1EB] dark:border-white/[0.08] text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
-        <span>Ultimate Processor</span>
-        <span className="font-mono tabular-nums">8 studios</span>
+        <span>FrameVault Studio</span>
+        <span className="font-mono tabular-nums">9 studios</span>
       </div>
     </aside>
   );

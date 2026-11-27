@@ -28,6 +28,7 @@ import {
   Film,
   Maximize,
   Minimize,
+  Layers,
 } from 'lucide-react';
 import {
   FolderGalleryItem,
@@ -74,6 +75,7 @@ interface FolderGalleryStudioProps {
   onSendToCropResize?: (images: ScrapedImage[]) => void;
   onSendToFilterStudio?: (images: ScrapedImage[]) => void;
   onSendToGifMaker?: (images: ScrapedImage[]) => void;
+  onStageInTray?: (images: ScrapedImage[]) => void;
 }
 
 interface DropFileWithPath {
@@ -259,6 +261,7 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
   onSendToCropResize,
   onSendToFilterStudio,
   onSendToGifMaker,
+  onStageInTray,
 }) => {
   const [items, setItems] = useState<FolderGalleryItem[]>([]);
   const [folderName, setFolderName] = useState<string>('');
@@ -1110,6 +1113,19 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
                       : `Download .ZIP (${actionTargets.length})`}
                   </span>
                 </button>
+
+                {onStageInTray && (
+                  <button
+                    type="button"
+                    onClick={() => onStageInTray(toScrapedImages(actionTargets))}
+                    disabled={actionTargets.length === 0}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#F4F6F9] dark:bg-white/[0.06] border border-[#DCE1EB] dark:border-white/[0.08] hover:border-slate-300 dark:hover:border-white/20 text-[#0F141F] dark:text-slate-200 font-medium transition-colors whitespace-nowrap cursor-pointer disabled:opacity-40"
+                    title="Stage images into cross-studio Working Tray"
+                  >
+                    <Layers className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>+ Tray</span>
+                  </button>
+                )}
 
                 {onSendToCropResize && (
                   <button

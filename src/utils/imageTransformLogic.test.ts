@@ -124,6 +124,21 @@ test('buildOutputFilename preserves subfolders, appends suffix, and updates exte
     }),
     'frame.png'
   );
+
+  assert.equal(
+    buildOutputFilename(
+      'shoot/day1/DSC_0042.JPG',
+      {
+        format: 'webp',
+        quality: 86,
+        suffix: '',
+        namingTemplate: '{index3}_{name}_{w}x{h}_{date}',
+        preserveSubfolders: true,
+      },
+      { index: 7, width: 1600, height: 1067, dateStr: '2026-11-27' }
+    ),
+    'shoot/day1/007_DSC_0042_1600x1067_2026-11-27.webp'
+  );
 });
 
 test('formatBytesCompact formats sizes readably', () => {

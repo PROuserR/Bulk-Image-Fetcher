@@ -34,7 +34,15 @@ export interface OutputConfig {
   format: OutputFormat;
   quality: number; // 50 - 100
   suffix: string;
+  namingTemplate?: string;
   preserveSubfolders: boolean;
+}
+
+export interface NamingTemplateContext {
+  index?: number;
+  width?: number;
+  height?: number;
+  dateStr?: string;
 }
 
 export const ASPECT_RATIO_VALUES: Record<AspectRatioPreset, number | null> = {
@@ -202,7 +210,45 @@ export function resolveOutputExtension(
   return { ext: 'jpg', mime: 'image/jpeg' };
 }
 
-export function buildOutputFilename(relativePath: string, options: OutputConfig): string {
+export function expandNamingTemplate(
+  template: string,
+  baseName: string,
+  ext: string,
+  context?: NamingTemplateContext
+): string {
+  const safeIdx = Math.max(1, Math.round(context?.index ?? 1));
+  const safeW =
+    context?.width && context.width > 0 ? String(Math.round(context.width)) : 'orig';
+  const safeH =
+    context?.height && context.height > 0 ? String(Math.round(context.height)) : 'orig';
+  const safeDate =
+    context?.dateStr && /^\d{4}-\d{2}-\d{2}$/.test(context.dateStr)
+      ? context.dateStr
+      : new Date().toISOString().slice(0, 10);
+
+  let stem = template
+    .replace(/\{name\}/gi, baseName)
+    .replace(/\{index3\}/gi, String(safeIdx).padStart(3, '0'))
+    .replace(/\{index\}/gi, String(safeIdx))
+    .replace(/\{w\}/gi, safeW)
+    .replace(/\{h\}/gi, safeH)
+    .replace(/\{date\}/gi, safeDate)
+    .replace(/\{format\}/gi, ext);
+
+  stem = stem
+    .replace(/[\\/:*?"<>|\x00-\x1f]/g, '_')
+    .replace(/\.{2,}/g, '_')
+    .replace(new RegExp(`\\.${ext}$`, 'i'), '')
+    .trim();
+
+  return stem || baseName;
+}
+
+export function buildOutputFilename(
+  relativePath: string,
+  options: OutputConfig,
+  templateContext?: NamingTemplateContext
+): string {
   const normalized = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
   const parts = normalized.split('/').filter(Boolean);
   const rawName = parts.pop() || 'image.jpg';
@@ -210,7 +256,11 @@ export function buildOutputFilename(relativePath: string, options: OutputConfig)
   const baseName = dotIdx > 0 ? rawName.slice(0, dotIdx) : rawName;
   const cleanSuffix = (options.suffix || '').replace(/[^a-zA-Z0-9_-]/g, '');
   const { ext } = resolveOutputExtension(rawName, options.format);
-  const finalFilename = `${baseName}${cleanSuffix}.${ext}`;
+  const rawTemplate = (options.namingTemplate || '').trim();
+  const finalStem = rawTemplate
+    ? expandNamingTemplate(rawTemplate, baseName, ext, templateContext)
+    : `${baseName}${cleanSuffix}`;
+  const finalFilename = `${finalStem}.${ext}`;
 
   if (options.preserveSubfolders && parts.length > 0) {
     return `${parts.join('/')}/${finalFilename}`;

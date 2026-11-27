@@ -251,7 +251,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
                 <span className="whitespace-nowrap">Capture, AI Vision &amp; Grading Workbench</span>
               </div>
               <h1 className="font-display text-3xl sm:text-4xl lg:text-[42px] font-bold text-[#0F141F] dark:text-[#F3F6FA] tracking-[-0.03em] leading-[1.08] [text-wrap:balance]">
-                Ultimate Image Processor for capture, AI vision &amp; precision grading.
+                FrameVault for capture, local AI synthesis &amp; precision grading.
               </h1>
               <p className="text-sm sm:text-[15px] text-slate-600 dark:text-slate-400 leading-relaxed mt-3.5 max-w-2xl">
                 Recover un-shrunk web &amp; Instagram originals, isolate portraits with{' '}
@@ -264,7 +264,7 @@ export const ScraperControls: React.FC<ScraperControlsProps> = ({
           ) : (
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
               <h1 className="font-display text-xl font-bold text-[#0F141F] dark:text-[#F3F6FA] tracking-tight">
-                Ultimate Image Processor — Capture &amp; Pipeline
+                FrameVault — Capture &amp; Pipeline
               </h1>
             </div>
           )}

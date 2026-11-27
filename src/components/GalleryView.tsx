@@ -99,6 +99,7 @@ interface GalleryViewProps {
   onSendToGifMaker?: (targetImages: ScrapedImage[]) => void;
   onSendToHumanClassifier?: (targetImages: ScrapedImage[]) => void;
   onSendToGemmaCaptioner?: (targetImages: ScrapedImage[]) => void;
+  onStageInTray?: (targetImages: ScrapedImage[]) => void;
   onOpenChecksumVerifier?: (targetImages: ScrapedImage[]) => void;
 }
 
@@ -455,6 +456,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   onSendToGifMaker,
   onSendToHumanClassifier,
   onSendToGemmaCaptioner,
+  onStageInTray,
   onOpenChecksumVerifier,
 }) => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -1113,6 +1115,25 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               Get All Full Links ({activeFilterCount > 0 ? `${filteredImages.length}/${images.length}` : images.length})
             </span>
           </button>
+
+          {onStageInTray && (
+            <button
+              type="button"
+              onClick={() => {
+                const targets =
+                  selectedIds.size > 0
+                    ? images.filter((img) => selectedIds.has(img.id))
+                    : filteredImages;
+                if (targets.length > 0) onStageInTray(targets);
+              }}
+              disabled={filteredImages.length === 0 && selectedIds.size === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-40"
+              title="Stage selected or filtered images in the persistent cross-studio Working Tray"
+            >
+              <Layers className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>+ Tray ({selectedIds.size > 0 ? selectedIds.size : filteredImages.length})</span>
+            </button>
+          )}
 
           {onSendToCropResize && (
             <button

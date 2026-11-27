@@ -53,6 +53,11 @@ import {
 import { triggerBlobDownload } from '../utils/downloader';
 import { ScrapedImage } from '../utils/scraperLogic';
 import { resolveSeededPreviewUrl } from '../utils/folderGalleryLogic';
+import {
+  BATCH_EXPORT_PRESETS_EVENT,
+  BatchExportPresetsEventDetail,
+  getActiveExportPreset,
+} from '../utils/batchExportPresets';
 
 interface FilterStudioItem {
   id: string;
@@ -133,11 +138,23 @@ export const FilterStudio: React.FC<FilterStudioProps> = ({
     },
   }));
 
-  const [outputConfig, setOutputConfig] = useState<OutputConfig>({
-    format: 'keep',
-    quality: 92,
-    suffix: '_filtered',
-    preserveSubfolders: false,
+  const [outputConfig, setOutputConfig] = useState<OutputConfig>(() => {
+    const active = getActiveExportPreset();
+    return active
+      ? {
+          format: active.outputFormat,
+          quality: active.quality,
+          suffix: '',
+          namingTemplate: active.namingTemplate,
+          preserveSubfolders: false,
+        }
+      : {
+          format: 'keep',
+          quality: 92,
+          suffix: '_filtered',
+          namingTemplate: '',
+          preserveSubfolders: false,
+        };
   });
 
   // Interactive Stage Controls
@@ -172,6 +189,25 @@ export const FilterStudio: React.FC<FilterStudioProps> = ({
           // ignore
         }
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    const onPresetChanged = (event: Event) => {
+      const detail = (event as CustomEvent<BatchExportPresetsEventDetail>).detail;
+      if (detail?.activePreset) {
+        setOutputConfig({
+          format: detail.activePreset.outputFormat,
+          quality: detail.activePreset.quality,
+          suffix: '',
+          namingTemplate: detail.activePreset.namingTemplate,
+          preserveSubfolders: false,
+        });
+      }
+    };
+    window.addEventListener(BATCH_EXPORT_PRESETS_EVENT, onPresetChanged);
+    return () => {
+      window.removeEventListener(BATCH_EXPORT_PRESETS_EVENT, onPresetChanged);
     };
   }, []);
 
@@ -532,10 +568,14 @@ export const FilterStudio: React.FC<FilterStudioProps> = ({
         recipe,
         outputConfig
       );
-      const outName = buildOutputFilename(activeItem.filename, {
-        ...outputConfig,
-        preserveSubfolders: false,
-      });
+      const outName = buildOutputFilename(
+        activeItem.filename,
+        {
+          ...outputConfig,
+          preserveSubfolders: false,
+        },
+        { index: 1, width: res.width, height: res.height }
+      );
       triggerBlobDownload(res.blob, outName);
       const msg = `Downloaded ${outName} (${res.width}×${res.height}).`;
       if (onNotify) {
@@ -583,10 +623,14 @@ export const FilterStudio: React.FC<FilterStudioProps> = ({
           outputConfig
         );
 
-        let name = buildOutputFilename(it.filename, {
-          ...outputConfig,
-          preserveSubfolders: false,
-        });
+        let name = buildOutputFilename(
+          it.filename,
+          {
+            ...outputConfig,
+            preserveSubfolders: false,
+          },
+          { index: i + 1, width: res.width, height: res.height }
+        );
         if (usedNames.has(name)) {
           const dot = name.lastIndexOf('.');
           const base = dot > 0 ? name.slice(0, dot) : name;
@@ -1468,22 +1512,46 @@ export const FilterStudio: React.FC<FilterStudioProps> = ({
 
                   <div className="space-y-1.5">
                     <label
-                      htmlFor="filter-export-suffix"
+                      htmlFor="filter-export-naming"
                       className="block text-xs font-semibold text-zinc-800 dark:text-zinc-200"
                     >
-                      Filename Suffix
+                      Naming Template <span className="font-mono text-[10px] font-normal text-zinc-500">({'{index3}'}, {'{name}'}, {'{w}'}×{'{h}'})</span>
                     </label>
                     <input
-                      id="filter-export-suffix"
+                      id="filter-export-naming"
                       type="text"
-                      value={outputConfig.suffix}
+                      value={outputConfig.namingTemplate ?? ''}
                       onChange={(e) =>
-                        setOutputConfig((prev) => ({ ...prev, suffix: e.target.value }))
+                        setOutputConfig((prev) => ({
+                          ...prev,
+                          namingTemplate: e.target.value,
+                        }))
                       }
-                      placeholder="_filtered"
+                      placeholder="{index3}_{name}_{w}x{h} (optional)"
                       className="w-full px-3 py-2 bg-zinc-50 dark:bg-[#0B0C10] border border-zinc-200 dark:border-zinc-800 rounded-lg font-mono text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                     />
                   </div>
+
+                  {!(outputConfig.namingTemplate || '').trim() && (
+                    <div className="space-y-1.5">
+                      <label
+                        htmlFor="filter-export-suffix"
+                        className="block text-xs font-semibold text-zinc-800 dark:text-zinc-200"
+                      >
+                        Filename Suffix
+                      </label>
+                      <input
+                        id="filter-export-suffix"
+                        type="text"
+                        value={outputConfig.suffix}
+                        onChange={(e) =>
+                          setOutputConfig((prev) => ({ ...prev, suffix: e.target.value }))
+                        }
+                        placeholder="_filtered"
+                        className="w-full px-3 py-2 bg-zinc-50 dark:bg-[#0B0C10] border border-zinc-200 dark:border-zinc-800 rounded-lg font-mono text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </div>

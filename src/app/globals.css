@@ -29,8 +29,8 @@
 }
 
 .dark .studio-canvas-bg {
-  background-color: #07090E;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.065) 1px, transparent 1px);
+  background-color: #0B0D12;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 

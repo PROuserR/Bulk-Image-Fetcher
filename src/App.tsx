@@ -26,10 +26,12 @@ import { FilterStudio } from './components/FilterStudio';
 import { GifMakerStudio } from './components/GifMakerStudio';
 import { HumanClassifierStudio } from './components/HumanClassifierStudio';
 import { GemmaStudio } from './components/GemmaStudio';
+import { ImageGenStudio } from './components/ImageGenStudio';
 import { DeploymentDocs } from './components/DeploymentDocs';
 import { LightboxModal } from './components/LightboxModal';
 import { CommandPalette } from './components/CommandPalette';
 import { ChecksumVerifierModal } from './components/ChecksumVerifierModal';
+import { WorkingTrayBar } from './components/WorkingTrayBar';
 import {
   ScrapedImage,
   FaceScanResult,
@@ -76,6 +78,13 @@ import {
   ensureImageDataUrlInBrowser,
   scanHumanFaceWithCustomLlm,
 } from './utils/customLlmClient';
+import {
+  BATCH_EXPORT_PRESETS_EVENT,
+  BatchExportPreset,
+  BatchExportPresetsEventDetail,
+  getActiveExportPreset,
+} from './utils/batchExportPresets';
+import { buildOutputFilename } from './utils/imageTransformLogic';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 
 const PAUSED_DIRECT_STORAGE_KEY = 'fullres_paused_direct_v1';
@@ -101,12 +110,13 @@ function compactImageForStorage(img: ScrapedImage): ScrapedImage {
 }
 
 export default function App() {
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [themeHydrated, setThemeHydrated] = useState<boolean>(false);
 
   const [activeTab, setActiveTab] = useState<WorkspaceTabId>('scraper');
   const [visitedTabs, setVisitedTabs] = useState<Set<WorkspaceTabId>>(() => new Set(['scraper']));
   const [hasOpenedCommandPalette, setHasOpenedCommandPalette] = useState<boolean>(false);
+  const [trayImages, setTrayImages] = useState<ScrapedImage[]>([]);
   const [cropSeedImages, setCropSeedImages] = useState<ScrapedImage[]>([]);
   const [filterSeedImages, setFilterSeedImages] = useState<ScrapedImage[]>([]);
   const [gifSeedImages, setGifSeedImages] = useState<ScrapedImage[]>([]);
@@ -123,6 +133,7 @@ export default function App() {
   const [isDownloadingZip, setIsDownloadingZip] = useState<boolean>(false);
   const [downloadProgress, setDownloadProgress] = useState<string | null>(null);
   const [archiveProgress, setArchiveProgress] = useState<ArchiveDownloadProgress | null>(null);
+  const [activeExportPreset, setActiveExportPreset] = useState<BatchExportPreset | null>(null);
   const [archiveFormat, setArchiveFormat] = useState<ArchiveFormat>(DEFAULT_ARCHIVE_FORMAT);
   const [isExportingZip, setIsExportingZip] = useState<boolean>(false);
   const [relayUrl, setRelayUrl] = useState<string>('');
@@ -376,6 +387,7 @@ export default function App() {
         urlTab === 'gif' ||
         urlTab === 'classifier' ||
         urlTab === 'gemma' ||
+        urlTab === 'generate' ||
         urlTab === 'docs'
       ) {
         markTabVisited(urlTab);
@@ -396,6 +408,7 @@ export default function App() {
           urlTab === 'gif' ||
           urlTab === 'classifier' ||
           urlTab === 'gemma' ||
+          urlTab === 'generate' ||
           urlTab === 'docs'
         ) {
           markTabVisited(urlTab);
@@ -413,12 +426,26 @@ export default function App() {
       const stored = localStorage.getItem('theme');
       if (stored === 'light' || stored === 'dark') {
         setTheme(stored);
-      } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      } else {
         setTheme('dark');
       }
     } catch {
       // ignore storage restrictions
     }
+
+    const initialPreset = getActiveExportPreset();
+    if (initialPreset) {
+      setActiveExportPreset(initialPreset);
+      setArchiveFormat(initialPreset.archiveFormat);
+    }
+    const onExportPresetsChanged = (ev: Event) => {
+      const detail = (ev as CustomEvent<BatchExportPresetsEventDetail>).detail;
+      setActiveExportPreset(detail?.activePreset ?? null);
+      if (detail?.activePreset) {
+        setArchiveFormat(detail.activePreset.archiveFormat);
+      }
+    };
+    window.addEventListener(BATCH_EXPORT_PRESETS_EVENT, onExportPresetsChanged);
 
     // Restore any paused downloads saved from earlier session
     try {
@@ -508,6 +535,7 @@ export default function App() {
 
     return () => {
       window.removeEventListener('popstate', onPopState);
+      window.removeEventListener(BATCH_EXPORT_PRESETS_EVENT, onExportPresetsChanged);
     };
   }, []);
 
@@ -536,7 +564,8 @@ export default function App() {
       '5': 'gif',
       '6': 'classifier',
       '7': 'gemma',
-      '8': 'docs',
+      '8': 'generate',
+      '9': 'docs',
     };
     const onGlobalKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -1614,15 +1643,35 @@ export default function App() {
     setErrorMessage(null);
     setProgressiveModeLabel(effectiveModeLabel);
 
-    const downloadItems: DownloadItemInput[] = targetImages.map((img, idx) => ({
-      id: img.id || `img-${idx}`,
-      url: img.fullUrl,
-      filename: img.filename || `image_${idx + 1}.jpg`,
-      fallbackUrl: img.fallbackUrl,
-      linkedPageUrl: img.linkedPageUrl,
-      referer: effectiveSourceUrl,
-      relayUrl: effectiveRelayUrl.trim() || undefined,
-    }));
+    const downloadItems: DownloadItemInput[] = targetImages.map((img, idx) => {
+      const rawFilename = img.filename || `image_${idx + 1}.jpg`;
+      const resolvedFilename = activeExportPreset?.namingTemplate
+        ? buildOutputFilename(
+            rawFilename,
+            {
+              format: 'keep',
+              quality: activeExportPreset.quality,
+              suffix: '',
+              namingTemplate: activeExportPreset.namingTemplate,
+              preserveSubfolders: false,
+            },
+            {
+              index: idx + 1,
+              width: img.width,
+              height: img.height,
+            }
+          )
+        : rawFilename;
+      return {
+        id: img.id || `img-${idx}`,
+        url: img.fullUrl,
+        filename: resolvedFilename,
+        fallbackUrl: img.fallbackUrl,
+        linkedPageUrl: img.linkedPageUrl,
+        referer: effectiveSourceUrl,
+        relayUrl: effectiveRelayUrl.trim() || undefined,
+      };
+    });
 
     const saveBlobFn = directoryHandle
       ? async (blob: Blob, filename: string) => {
@@ -1903,9 +1952,40 @@ export default function App() {
             }}
             onExportProjectZip={handleExportProjectZip}
             isExportingZip={isExportingZip}
+            onNotify={showToast}
           />
 
           <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
+            <WorkingTrayBar
+              items={trayImages}
+              onRemoveItem={(id) =>
+                setTrayImages((prev) => prev.filter((item) => item.id !== id))
+              }
+              onClearAll={() => {
+                setTrayImages([]);
+                showToast('Cleared Working Tray.');
+              }}
+              onSendToCrop={(items) => {
+                setCropSeedImages(items);
+                handleSelectTab('crop');
+              }}
+              onSendToFilters={(items) => {
+                setFilterSeedImages(items);
+                handleSelectTab('filters');
+              }}
+              onSendToGif={(items) => {
+                setGifSeedImages(items);
+                handleSelectTab('gif');
+              }}
+              onSendToClassifier={(items) => {
+                setClassifierSeedImages(items);
+                handleSelectTab('classifier');
+              }}
+              onSendToVision={(items) => {
+                setGemmaSeedImages(items);
+                handleSelectTab('gemma');
+              }}
+            />
             {successToast && (
               <div className="px-4 py-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/80 text-emerald-900 dark:text-emerald-200 text-xs sm:text-sm font-medium rounded-xl flex items-center gap-2.5 animate-fadeIn">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
@@ -2106,6 +2186,18 @@ export default function App() {
                       setGemmaSeedImages(targets);
                       handleSelectTab('gemma');
                     }}
+                    onStageInTray={(targets) => {
+                      if (!targets.length) return;
+                      setTrayImages((prev) => {
+                        const existingKeys = new Set(prev.map((p) => `${p.id}::${p.fullUrl}`));
+                        const additions = targets.filter(
+                          (t) => !existingKeys.has(`${t.id}::${t.fullUrl}`)
+                        );
+                        if (additions.length === 0) return prev;
+                        return [...prev, ...additions].slice(-24);
+                      });
+                      showToast(`Staged ${targets.length} image(s) in Working Tray.`);
+                    }}
                     onOpenChecksumVerifier={handleOpenGalleryChecksumVerifier}
                   />
                 )}
@@ -2132,6 +2224,18 @@ export default function App() {
                     onSendToGifMaker={(targets) => {
                       setGifSeedImages(targets);
                       handleSelectTab('gif');
+                    }}
+                    onStageInTray={(targets) => {
+                      if (!targets.length) return;
+                      setTrayImages((prev) => {
+                        const existingKeys = new Set(prev.map((p) => `${p.id}::${p.fullUrl}`));
+                        const additions = targets.filter(
+                          (t) => !existingKeys.has(`${t.id}::${t.fullUrl}`)
+                        );
+                        if (additions.length === 0) return prev;
+                        return [...prev, ...additions].slice(-24);
+                      });
+                      showToast(`Staged ${targets.length} image(s) in Working Tray.`);
                     }}
                   />
                 )}
@@ -2222,7 +2326,49 @@ export default function App() {
                 )}
               </div>
 
-              {/* Tab 7: Setup & Deployment Instructions */}
+              {/* Tab 7: Local AI Image Generation Studio */}
+              <div
+                id="tabpanel-generate"
+                role="tabpanel"
+                hidden={activeTab !== 'generate'}
+                className={activeTab === 'generate' ? 'block' : 'hidden'}
+              >
+                {visitedTabs.has('generate') && (
+                  <ImageGenStudio
+                    onNotify={showToast}
+                    onSendToCropResize={(targets) => {
+                      setCropSeedImages(targets);
+                      handleSelectTab('crop');
+                    }}
+                    onSendToFilterStudio={(targets) => {
+                      setFilterSeedImages(targets);
+                      handleSelectTab('filters');
+                    }}
+                    onSendToGifMaker={(targets) => {
+                      setGifSeedImages(targets);
+                      handleSelectTab('gif');
+                    }}
+                    onSendToGemmaCaptioner={(targets) => {
+                      setGemmaSeedImages(targets);
+                      handleSelectTab('gemma');
+                    }}
+                    onStageInTray={(targets) => {
+                      if (!targets.length) return;
+                      setTrayImages((prev) => {
+                        const existingKeys = new Set(prev.map((p) => `${p.id}::${p.fullUrl}`));
+                        const additions = targets.filter(
+                          (t) => !existingKeys.has(`${t.id}::${t.fullUrl}`)
+                        );
+                        if (additions.length === 0) return prev;
+                        return [...prev, ...additions].slice(-24);
+                      });
+                      showToast(`Staged ${targets.length} image(s) in Working Tray.`);
+                    }}
+                  />
+                )}
+              </div>
+
+              {/* Tab 8: Setup & Deployment Instructions */}
               <div
                 id="tabpanel-docs"
                 role="tabpanel"
@@ -2283,14 +2429,14 @@ export default function App() {
             />
           )}
 
-          <footer className="mt-auto border-t border-[#DCE1EB] dark:border-white/[0.08] py-4 px-4 sm:px-6 lg:px-8 bg-white/95 dark:bg-[#0A0D14]/95 transition-colors">
+          <footer className="mt-auto border-t border-[#DCE1EB] dark:border-white/[0.08] py-4 px-4 sm:px-6 lg:px-8 bg-white/95 dark:bg-[#0B0D12]/95 transition-colors">
             <div className="max-w-[1440px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
               <div className="flex items-center gap-2">
                 <span className="font-display font-semibold text-[#0F141F] dark:text-[#F3F6FA]">
-                  Ultimate Image Processor
+                  FrameVault
                 </span>
                 <span aria-hidden="true">·</span>
-                <span>Capture, AI Vision, Color Grading &amp; Post-Production Suite</span>
+                <span>Capture, Local AI Synthesis &amp; Precision Grading Suite</span>
               </div>
               <div className="font-mono text-[11px]">
                 Press ⌘K to switch studios or launch actions

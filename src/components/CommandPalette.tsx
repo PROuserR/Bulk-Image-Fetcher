@@ -130,8 +130,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       },
       {
         id: 'action-theme',
-        label: `Switch to ${theme === 'dark' ? 'Archival Light' : 'Calibrated Dark'} Theme`,
-        detail: 'Toggle Ultimate Image Processor workspace theme',
+        label: `Switch to ${theme === 'dark' ? 'Archival Light' : 'Calibrated Darkroom'} Theme`,
+        detail: 'Toggle FrameVault workspace theme',
         category: 'Quick Actions',
         icon: theme === 'dark' ? Sun : Moon,
         run: () => {
@@ -213,7 +213,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Ultimate Image Processor Command Palette"
+      aria-label="FrameVault Command Palette"
       className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-start justify-center pt-[12vh] px-4"
       onClick={onClose}
     >

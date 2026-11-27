@@ -44,6 +44,12 @@ import { triggerBlobDownload } from '../utils/downloader';
 import { fetchApiJson } from '../utils/safeFetchJson';
 import { ScrapedImage } from '../utils/scraperLogic';
 import { resolveSeededPreviewUrl } from '../utils/folderGalleryLogic';
+import {
+  BATCH_EXPORT_PRESETS_EVENT,
+  BatchExportPresetsEventDetail,
+  exportPresetToOutputConfig,
+  getActiveExportPreset,
+} from '../utils/batchExportPresets';
 
 export interface StudioDirectoryItem {
   id: string;
@@ -114,22 +120,33 @@ export const CropResizeStudio: React.FC<CropResizeStudioProps> = ({
   const [diskOverwrite, setDiskOverwrite] = useState<boolean>(false);
   const [isScanningDisk, setIsScanningDisk] = useState<boolean>(false);
 
-  // Transform controls
+  // Transform controls (seeded from active Header Batch Export Preset if set)
   const [aspectPreset, setAspectPreset] = useState<AspectRatioPreset>('free');
-  const [resizeConfig, setResizeConfig] = useState<ResizeConfig>({
-    mode: 'original',
-    width: 1920,
-    height: 1080,
-    maxEdge: 1600,
-    percent: 50,
-    lockAspect: true,
-    fit: 'cover',
+  const [resizeConfig, setResizeConfig] = useState<ResizeConfig>(() => {
+    const active = getActiveExportPreset();
+    return active
+      ? { ...active.resize }
+      : {
+          mode: 'original',
+          width: 1920,
+          height: 1080,
+          maxEdge: 1600,
+          percent: 50,
+          lockAspect: true,
+          fit: 'cover',
+        };
   });
-  const [outputConfig, setOutputConfig] = useState<OutputConfig>({
-    format: 'keep',
-    quality: 90,
-    suffix: '_resized',
-    preserveSubfolders: true,
+  const [outputConfig, setOutputConfig] = useState<OutputConfig>(() => {
+    const active = getActiveExportPreset();
+    return active
+      ? exportPresetToOutputConfig(active)
+      : {
+          format: 'keep',
+          quality: 90,
+          suffix: '_resized',
+          namingTemplate: '',
+          preserveSubfolders: true,
+        };
   });
 
   // Processing state
@@ -162,6 +179,20 @@ export const CropResizeStudio: React.FC<CropResizeStudioProps> = ({
           // ignore
         }
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    const onPresetChanged = (event: Event) => {
+      const detail = (event as CustomEvent<BatchExportPresetsEventDetail>).detail;
+      if (detail?.activePreset) {
+        setResizeConfig({ ...detail.activePreset.resize });
+        setOutputConfig(exportPresetToOutputConfig(detail.activePreset));
+      }
+    };
+    window.addEventListener(BATCH_EXPORT_PRESETS_EVENT, onPresetChanged);
+    return () => {
+      window.removeEventListener(BATCH_EXPORT_PRESETS_EVENT, onPresetChanged);
     };
   }, []);
 
@@ -602,10 +633,14 @@ export const CropResizeStudio: React.FC<CropResizeStudioProps> = ({
         resize: resizeConfig,
         output: outputConfig,
       });
-      const outName = buildOutputFilename(activeItem.relativePath, {
-        ...outputConfig,
-        preserveSubfolders: false,
-      });
+      const outName = buildOutputFilename(
+        activeItem.relativePath,
+        {
+          ...outputConfig,
+          preserveSubfolders: false,
+        },
+        { index: 1, width: result.width, height: result.height }
+      );
       triggerBlobDownload(result.blob, outName);
       const msg = `Downloaded ${outName} (${result.width}×${result.height}).`;
       setStatusMsg(msg);
@@ -667,7 +702,11 @@ export const CropResizeStudio: React.FC<CropResizeStudioProps> = ({
           output: outputConfig,
         });
 
-        let targetRelPath = buildOutputFilename(item.relativePath, outputConfig);
+        let targetRelPath = buildOutputFilename(item.relativePath, outputConfig, {
+          index: i + 1,
+          width: res.width,
+          height: res.height,
+        });
         if (usedPaths.has(targetRelPath)) {
           const dotIdx = targetRelPath.lastIndexOf('.');
           const base = dotIdx > 0 ? targetRelPath.slice(0, dotIdx) : targetRelPath;
@@ -726,7 +765,11 @@ export const CropResizeStudio: React.FC<CropResizeStudioProps> = ({
           output: outputConfig,
         });
 
-        const relOut = buildOutputFilename(item.relativePath, outputConfig);
+        const relOut = buildOutputFilename(item.relativePath, outputConfig, {
+          index: i + 1,
+          width: res.width,
+          height: res.height,
+        });
         const parts = relOut.split('/').filter(Boolean);
         const fileName = parts.pop() || `image_${i + 1}.jpg`;
         let dirHandle = rootHandle;

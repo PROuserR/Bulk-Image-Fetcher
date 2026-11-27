@@ -451,19 +451,39 @@ export const CropResizeInspector: React.FC<CropResizeInspectorProps> = ({
           </div>
         )}
 
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <div>
-            <label className="block text-zinc-500 dark:text-zinc-400 mb-1">Filename Suffix</label>
+            <label className="block text-zinc-500 dark:text-zinc-400 mb-1">
+              Naming Template <span className="font-mono text-[10px] opacity-75">({'{index3}'}, {'{name}'}, {'{w}'}×{'{h}'})</span>
+            </label>
             <input
               type="text"
-              value={outputConfig.suffix}
+              value={outputConfig.namingTemplate ?? ''}
               onChange={(e) =>
-                onChangeOutputConfig((prev) => ({ ...prev, suffix: e.target.value }))
+                onChangeOutputConfig((prev) => ({
+                  ...prev,
+                  namingTemplate: e.target.value,
+                }))
               }
-              placeholder="_resized"
+              placeholder="{index3}_{name}_{w}x{h} (optional)"
               className="w-full px-2.5 py-1.5 bg-zinc-50 dark:bg-[#0B0C10] border border-zinc-200 dark:border-zinc-800 rounded-lg font-mono text-zinc-950 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
             />
           </div>
+
+          {!(outputConfig.namingTemplate || '').trim() && (
+            <div>
+              <label className="block text-zinc-500 dark:text-zinc-400 mb-1">Filename Suffix</label>
+              <input
+                type="text"
+                value={outputConfig.suffix}
+                onChange={(e) =>
+                  onChangeOutputConfig((prev) => ({ ...prev, suffix: e.target.value }))
+                }
+                placeholder="_resized"
+                className="w-full px-2.5 py-1.5 bg-zinc-50 dark:bg-[#0B0C10] border border-zinc-200 dark:border-zinc-800 rounded-lg font-mono text-zinc-950 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
+          )}
 
           <label className="flex items-center gap-2 cursor-pointer select-none text-zinc-700 dark:text-zinc-300">
             <input

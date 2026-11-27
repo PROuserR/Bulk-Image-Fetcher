@@ -27,9 +27,9 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
-const SITE_TITLE = 'Ultimate Image Processor — Capture, AI Vision & Grading Suite';
+const SITE_TITLE = 'FrameVault — Capture, Local AI Synthesis & Grading Studio';
 const SITE_DESCRIPTION =
-  'Ultimate Image Processor studio: full-resolution web & Instagram extraction, AI human-face filtering, non-destructive color grading & lenses, batch crop/resize, GIF89a synthesis, and Gemma 4 vision.';
+  'FrameVault local-first imaging suite: full-resolution web & Instagram capture, local folder gallery, batch crop/resize, non-destructive color grading, GIF89a motion, Ollama/Gemma vision, and local SD/ComfyUI/MOSS generation.';
 
 export const metadata: Metadata = {
   title: SITE_TITLE,
@@ -50,11 +50,10 @@ const THEME_INIT_SCRIPT = `
 (function() {
   try {
     var theme = localStorage.getItem('theme');
-    var supportDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    if (theme === 'dark' || (!theme && supportDark)) {
-      document.documentElement.classList.add('dark');
-    } else {
+    if (theme === 'light') {
       document.documentElement.classList.remove('dark');
+    } else {
+      document.documentElement.classList.add('dark');
     }
   } catch (e) {}
 })();
