@@ -17,9 +17,9 @@ import {
   ImagePlus,
   BookOpen,
   Command,
+  Image
 } from 'lucide-react';
 import { WorkspaceTabId } from './Header';
-import brandLogoImg from '../assets/images/framevault_logo_1795790818624.jpg';
 
 /** Navigation descriptor for each studio rail entry and Cmd/Ctrl+K command item. */
 export interface StudioNavEntry {
@@ -152,10 +152,7 @@ export const StudioSidebar: React.FC<StudioSidebarProps> = ({
           aria-label="FrameVault Home"
         >
           <span className="w-8 h-8 rounded-lg overflow-hidden shrink-0 border border-black/15 dark:border-white/15 bg-[#0B0D12]">
-            <img
-              src={brandLogoImg.src}
-              alt="FrameVault logo"
-              referrerPolicy="no-referrer"
+            <Image
               className="w-full h-full object-cover"
             />
           </span>
@@ -221,19 +218,17 @@ export const StudioSidebar: React.FC<StudioSidebarProps> = ({
                     onClick={() => onSelectTab(item.id)}
                     onMouseEnter={() => onPrefetchTab?.(item.id)}
                     onFocus={() => onPrefetchTab?.(item.id)}
-                    className={`w-full flex items-center justify-between gap-2.5 px-2.5 py-2 rounded-xl text-left transition-all duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
-                      isActive
-                        ? 'bg-[#F4F6F9] dark:bg-[#131823] text-[#0F141F] dark:text-white border border-[#DCE1EB] dark:border-white/[0.12]'
-                        : 'text-slate-600 dark:text-slate-400 border border-transparent hover:bg-[#F4F6F9]/75 dark:hover:bg-white/[0.04] hover:text-[#0F141F] dark:hover:text-slate-100'
-                    }`}
+                    className={`w-full flex items-center justify-between gap-2.5 px-2.5 py-2 rounded-xl text-left transition-all duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${isActive
+                      ? 'bg-[#F4F6F9] dark:bg-[#131823] text-[#0F141F] dark:text-white border border-[#DCE1EB] dark:border-white/[0.12]'
+                      : 'text-slate-600 dark:text-slate-400 border border-transparent hover:bg-[#F4F6F9]/75 dark:hover:bg-white/[0.04] hover:text-[#0F141F] dark:hover:text-slate-100'
+                      }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
                       <span
-                        className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                          isActive
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-[#EEF1F6] dark:bg-white/[0.06] text-slate-600 dark:text-slate-400'
-                        }`}
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${isActive
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-[#EEF1F6] dark:bg-white/[0.06] text-slate-600 dark:text-slate-400'
+                          }`}
                       >
                         <Icon className="w-3.5 h-3.5" />
                       </span>
