@@ -71,6 +71,11 @@ import { ProgressiveDownloadBar } from './components/ProgressiveDownloadBar';
 import { ArchiveDownloadBar } from './components/ArchiveDownloadBar';
 import { fetchApiJson } from './utils/safeFetchJson';
 import { tryCaptureBrowserPreviewDataUrl } from './utils/clientImageCache';
+import { loadCustomLlmSettings } from './utils/customLlmConfig';
+import {
+  ensureImageDataUrlInBrowser,
+  scanHumanFaceWithCustomLlm,
+} from './utils/customLlmClient';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 
 const PAUSED_DIRECT_STORAGE_KEY = 'fullres_paused_direct_v1';
@@ -1212,9 +1217,50 @@ export default function App() {
       let scannedSoFar = 0;
       const accumulatedResults: Record<string, FaceScanResult> = { ...currentMap };
 
+      const activeCustomLlm = loadCustomLlmSettings();
+
       const sendFaceScanChunk = async (
         chunkItems: Array<{ img: ScrapedImage; previewDataUrl?: string }>
       ) => {
+        if (activeCustomLlm.provider !== 'builtin') {
+          for (const { img, previewDataUrl } of chunkItems) {
+            if (abortController.signal.aborted) return false;
+            try {
+              const targetUrl =
+                previewDataUrl ||
+                img.thumbnailUrl ||
+                img.fullUrl ||
+                img.fallbackUrl ||
+                '';
+              const dataUrl = await ensureImageDataUrlInBrowser(targetUrl, 512);
+              const verdict = await scanHumanFaceWithCustomLlm(activeCustomLlm, {
+                id: img.id,
+                imageDataUrl: dataUrl,
+                signal: abortController.signal,
+              });
+              accumulatedResults[img.id] = {
+                hasHumanFace: verdict.hasHumanFace,
+                faceCount: verdict.faceCount,
+                confidence: verdict.confidence,
+                subjectSummary: verdict.subjectSummary,
+                error: verdict.error,
+              };
+            } catch (scanErr: any) {
+              accumulatedResults[img.id] = {
+                hasHumanFace: false,
+                faceCount: 0,
+                confidence: 0,
+                subjectSummary: '',
+                error: scanErr?.message || 'Failed to inspect image with custom LLM',
+              };
+            }
+          }
+          const snapshot = { ...accumulatedResults };
+          faceScanMapRef.current = snapshot;
+          setFaceScanMap(snapshot);
+          return true;
+        }
+
         const { ok, data, error } = await fetchApiJson('/api/ai/human-face-filter', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

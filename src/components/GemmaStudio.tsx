@@ -33,6 +33,20 @@ import {
 import { triggerBlobDownload, triggerTextDownload } from '../utils/downloader';
 import { ScrapedImage } from '../utils/scraperLogic';
 import { resolveSeededPreviewUrl } from '../utils/folderGalleryLogic';
+import {
+  CUSTOM_LLM_SETTINGS_EVENT,
+  CustomLlmSettings,
+  DEFAULT_CUSTOM_LLM_SETTINGS,
+  getActiveEngineDisplayName,
+  loadCustomLlmSettings,
+  saveCustomLlmSettings,
+} from '../utils/customLlmConfig';
+import {
+  captionSingleImageWithCustomLlm,
+  ensureImageDataUrlInBrowser,
+  runCustomLlmChatTurn,
+} from '../utils/customLlmClient';
+import { LlmProviderPanel } from './LlmProviderPanel';
 
 interface GemmaStudioProps {
   seededScrapedImages?: ScrapedImage[];
@@ -298,6 +312,9 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
   const [subMode, setSubMode] = useState<StudioSubMode>('chat');
   const [runtimeStatus, setRuntimeStatus] = useState<GemmaStatusSnapshot | null>(null);
   const [isWarming, setIsWarming] = useState<boolean>(false);
+  const [llmSettings, setLlmSettings] = useState<CustomLlmSettings>(
+    DEFAULT_CUSTOM_LLM_SETTINGS
+  );
 
   // --- Multimodal Chat State ---
   const [chatMessages, setChatMessages] = useState<GemmaChatTurn[]>([]);
@@ -353,6 +370,23 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
     } catch {
       // ignore transient status poll failures
     }
+  }, []);
+
+  useEffect(() => {
+    setLlmSettings(loadCustomLlmSettings());
+    const handleSync = (e: Event) => {
+      const customEvent = e as CustomEvent<CustomLlmSettings>;
+      if (customEvent.detail) {
+        setLlmSettings(customEvent.detail);
+      }
+    };
+    window.addEventListener(CUSTOM_LLM_SETTINGS_EVENT, handleSync);
+    return () => window.removeEventListener(CUSTOM_LLM_SETTINGS_EVENT, handleSync);
+  }, []);
+
+  const handleUpdateLlmSettings = useCallback((next: CustomLlmSettings) => {
+    const saved = saveCustomLlmSettings(next);
+    setLlmSettings(saved);
   }, []);
 
   useEffect(() => {
@@ -500,7 +534,11 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
     setChatAttachments([]);
     setChatError(null);
     setStreamingAssistantText('');
-    setChatStatusText('Starting Gemma 4 E2B...');
+    setChatStatusText(
+      llmSettings.provider === 'builtin'
+        ? 'Starting Gemma 4 E2B...'
+        : `Connecting to ${getActiveEngineDisplayName(llmSettings)}...`
+    );
     setIsChatStreaming(true);
 
     const controller = new AbortController();
@@ -509,37 +547,54 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
     let assembledReply = '';
 
     try {
-      const resp = await fetch('/api/ai/gemma/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      if (llmSettings.provider !== 'builtin') {
+        const result = await runCustomLlmChatTurn(llmSettings, {
           history: chatMessages,
           userText: userTurn.text,
           userImages: outgoingImages,
-        }),
-        signal: controller.signal,
-      });
-
-      if (!resp.ok) {
-        const errPayload = await resp.json().catch(() => ({}));
-        throw new Error(errPayload.error || `HTTP ${resp.status}`);
-      }
-
-      await consumeNdjsonStream(resp, (ev) => {
-        if (ev.type === 'status' && typeof ev.message === 'string') {
-          setChatStatusText(ev.message);
-        } else if (ev.type === 'delta' && typeof ev.text === 'string') {
-          setChatStatusText('');
-          assembledReply += ev.text;
-          setStreamingAssistantText(assembledReply);
-        } else if (ev.type === 'done') {
-          const finalReply =
-            typeof ev.reply === 'string' && ev.reply.trim() ? ev.reply : assembledReply;
-          assembledReply = finalReply;
-        } else if (ev.type === 'error') {
-          throw new Error(ev.error || 'Chat generation failed');
+          signal: controller.signal,
+          onDelta: (delta) => {
+            setChatStatusText('');
+            assembledReply += delta;
+            setStreamingAssistantText(assembledReply);
+          },
+        });
+        if (result.reply.trim()) {
+          assembledReply = result.reply;
         }
-      });
+      } else {
+        const resp = await fetch('/api/ai/gemma/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            history: chatMessages,
+            userText: userTurn.text,
+            userImages: outgoingImages,
+          }),
+          signal: controller.signal,
+        });
+
+        if (!resp.ok) {
+          const errPayload = await resp.json().catch(() => ({}));
+          throw new Error(errPayload.error || `HTTP ${resp.status}`);
+        }
+
+        await consumeNdjsonStream(resp, (ev) => {
+          if (ev.type === 'status' && typeof ev.message === 'string') {
+            setChatStatusText(ev.message);
+          } else if (ev.type === 'delta' && typeof ev.text === 'string') {
+            setChatStatusText('');
+            assembledReply += ev.text;
+            setStreamingAssistantText(assembledReply);
+          } else if (ev.type === 'done') {
+            const finalReply =
+              typeof ev.reply === 'string' && ev.reply.trim() ? ev.reply : assembledReply;
+            assembledReply = finalReply;
+          } else if (ev.type === 'error') {
+            throw new Error(ev.error || 'Chat generation failed');
+          }
+        });
+      }
 
       if (assembledReply.trim()) {
         setChatMessages((prev) => [
@@ -547,7 +602,9 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
           { role: 'assistant', text: assembledReply.trim() },
         ]);
       }
-      refreshRuntimeStatus();
+      if (llmSettings.provider === 'builtin') {
+        refreshRuntimeStatus();
+      }
     } catch (err: any) {
       if (err?.name === 'AbortError') {
         if (assembledReply.trim()) {
@@ -557,7 +614,7 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
           ]);
         }
       } else {
-        setChatError(err?.message || 'Failed to generate Gemma 4 reply.');
+        setChatError(err?.message || 'Failed to generate reply.');
       }
     } finally {
       chatAbortRef.current = null;
@@ -643,13 +700,78 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
     setCaptionProgress({
       done: 0,
       total: selectedCaptionItems.length,
-      label: 'Initializing local Gemma 4 E2B...',
+      label:
+        llmSettings.provider === 'builtin'
+          ? 'Initializing local Gemma 4 E2B...'
+          : `Connecting to ${getActiveEngineDisplayName(llmSettings)}...`,
     });
 
     const controller = new AbortController();
     captionAbortRef.current = controller;
 
     try {
+      if (llmSettings.provider !== 'builtin') {
+        const completedResults: CaptionedImageResult[] = [];
+        for (let i = 0; i < selectedCaptionItems.length; i++) {
+          if (controller.signal.aborted) break;
+          const item = selectedCaptionItems[i];
+          setCaptionProgress({
+            done: i,
+            total: selectedCaptionItems.length,
+            label: `Captioning ${item.filename} (${i + 1}/${selectedCaptionItems.length})...`,
+          });
+
+          let dataUrl = item.dataUrl || '';
+          if (!dataUrl) {
+            try {
+              dataUrl = await ensureImageDataUrlInBrowser(
+                item.remoteUrl || item.previewUrl,
+                512
+              );
+            } catch (imgErr: any) {
+              const errRes: CaptionedImageResult = {
+                id: item.id,
+                filename: item.filename,
+                relativePath: item.relativePath,
+                style: captionStyle,
+                caption: '',
+                detailedDescription: '',
+                subjects: [],
+                tags: [],
+                setting: '',
+                durationMs: 0,
+                error: imgErr?.message || 'Unable to decode image for vision model',
+              };
+              completedResults.push(errRes);
+              setCaptionResults([...completedResults]);
+              continue;
+            }
+          }
+
+          const captioned = await captionSingleImageWithCustomLlm(llmSettings, {
+            id: item.id,
+            filename: item.filename,
+            relativePath: item.relativePath,
+            dataUrl,
+            style: captionStyle,
+            customPrompt: customCaptionFocus.trim() || undefined,
+            signal: controller.signal,
+          });
+          completedResults.push(captioned);
+          setCaptionResults([...completedResults]);
+          setCaptionProgress({
+            done: i + 1,
+            total: selectedCaptionItems.length,
+            label: `Captioned ${i + 1}/${selectedCaptionItems.length}`,
+          });
+        }
+        const okCount = completedResults.filter((r) => !r.error).length;
+        onNotify?.(
+          `Auto-captioned ${okCount} image(s) with ${getActiveEngineDisplayName(llmSettings)}.`
+        );
+        return;
+      }
+
       const resp = await fetch('/api/ai/gemma/caption', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -721,6 +843,76 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
     captionAbortRef.current = controller;
 
     try {
+      if (llmSettings.provider !== 'builtin') {
+        const scanResp = await fetch('/api/crop-resize/scan-dir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            directoryPath: cleanDir,
+            recursive: dirRecursive,
+          }),
+          signal: controller.signal,
+        });
+        const scanData = await scanResp.json().catch(() => ({}));
+        if (!scanResp.ok) {
+          throw new Error(scanData.error || `HTTP ${scanResp.status} scanning directory`);
+        }
+
+        const resolvedRoot = scanData.resolvedRoot || cleanDir;
+        const scannedImages: Array<{ relativePath: string; filename: string }> = Array.isArray(
+          scanData.images
+        )
+          ? scanData.images.slice(0, 120)
+          : [];
+        if (scannedImages.length === 0) {
+          throw new Error(`No supported images found inside ${resolvedRoot}.`);
+        }
+
+        setScannedDirRoot(resolvedRoot);
+        const urlMap: Record<string, string> = {};
+        scannedImages.forEach((img, idx) => {
+          urlMap[`disk_${idx + 1}`] =
+            `/api/crop-resize/local-preview?root=${encodeURIComponent(resolvedRoot)}&file=${encodeURIComponent(img.relativePath)}`;
+        });
+        setPreviewUrlById(urlMap);
+
+        const completedResults: CaptionedImageResult[] = [];
+        for (let i = 0; i < scannedImages.length; i++) {
+          if (controller.signal.aborted) break;
+          const img = scannedImages[i];
+          const id = `disk_${i + 1}`;
+          setCaptionProgress({
+            done: i,
+            total: scannedImages.length,
+            label: `Captioning ${img.relativePath} (${i + 1}/${scannedImages.length})...`,
+          });
+
+          const dataUrl = await ensureImageDataUrlInBrowser(urlMap[id], 512);
+          const captioned = await captionSingleImageWithCustomLlm(llmSettings, {
+            id,
+            filename: img.filename,
+            relativePath: img.relativePath,
+            dataUrl,
+            style: captionStyle,
+            customPrompt: customCaptionFocus.trim() || undefined,
+            signal: controller.signal,
+          });
+          completedResults.push(captioned);
+          setCaptionResults([...completedResults]);
+          setCaptionProgress({
+            done: i + 1,
+            total: scannedImages.length,
+            label: `Captioned ${i + 1}/${scannedImages.length}`,
+          });
+        }
+
+        const okCount = completedResults.filter((r) => !r.error).length;
+        onNotify?.(
+          `Captioned ${okCount} directory images via ${getActiveEngineDisplayName(llmSettings)}.`
+        );
+        return;
+      }
+
       const resp = await fetch('/api/ai/gemma/disk-caption', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -843,8 +1035,12 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
     [captionResults]
   );
 
-  const statusTone =
-    runtimeStatus?.status === 'ready'
+  const isCustomProvider = llmSettings.provider !== 'builtin';
+  const activeEngineLabel = getActiveEngineDisplayName(llmSettings);
+
+  const statusTone = isCustomProvider
+    ? 'bg-emerald-500'
+    : runtimeStatus?.status === 'ready'
       ? 'bg-emerald-500'
       : runtimeStatus?.status === 'starting' || isWarming
         ? 'bg-amber-500 animate-pulse'
@@ -852,8 +1048,9 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
           ? 'bg-rose-500'
           : 'bg-zinc-400';
 
-  const statusText =
-    runtimeStatus?.status === 'ready'
+  const statusText = isCustomProvider
+    ? `${llmSettings.baseUrl}`
+    : runtimeStatus?.status === 'ready'
       ? 'Ready (Loaded in Memory)'
       : runtimeStatus?.status === 'starting' || isWarming
         ? 'Loading Gemma 4 Model...'
@@ -870,16 +1067,18 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
             <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
               <span className={`inline-block w-2 h-2 rounded-full ${statusTone}`} />
               <span className="font-mono font-semibold text-zinc-700 dark:text-zinc-300">
-                {runtimeStatus?.modelName || 'Gemma 4 E2B (Open-Source Local)'}
+                {isCustomProvider
+                  ? activeEngineLabel
+                  : runtimeStatus?.modelName || 'Gemma 4 E2B (Open-Source Local)'}
               </span>
               <span aria-hidden="true">·</span>
-              <span>{statusText}</span>
+              <span className="truncate max-w-xs">{statusText}</span>
             </div>
             <h1 className="text-xl sm:text-2xl font-display font-bold text-zinc-950 dark:text-zinc-50 tracking-tight">
-              Gemma 4 Multimodal Chat &amp; Auto-Captioner
+              AI Multimodal Chat &amp; Auto-Captioner
             </h1>
             <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 max-w-3xl">
-              Chat locally with open-source Gemma 4 using single or multi-image attachments, or batch-caption selected files and server folders into structured descriptions, tags, CSV/JSON/Markdown, and .txt sidecars.
+              Chat with built-in Gemma 4 or connect your own Ollama / OpenAI-compatible LLM URL for private offline multi-image vision, batch captioning, CSV/JSON/Markdown exports, and .txt sidecars.
             </p>
           </div>
 
@@ -919,7 +1118,7 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
               </button>
             </div>
 
-            {runtimeStatus?.status !== 'ready' && (
+            {!isCustomProvider && runtimeStatus?.status !== 'ready' && (
               <button
                 type="button"
                 onClick={handleWarmModel}
@@ -937,6 +1136,13 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
           </div>
         </div>
       </section>
+
+      {/* LLM Backend / Ollama Local Offline Provider Switcher */}
+      <LlmProviderPanel
+        settings={llmSettings}
+        onChange={handleUpdateLlmSettings}
+        onNotify={onNotify}
+      />
 
       {/* ==================== MODE 1: MULTI-IMAGE CHAT ==================== */}
       {subMode === 'chat' && (
@@ -979,10 +1185,10 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
                     <Sparkles className="w-5 h-5" />
                   </div>
                   <h3 className="text-base font-display font-bold text-zinc-950 dark:text-white">
-                    Ask Gemma 4 about one or multiple images
+                    Ask {isCustomProvider ? activeEngineLabel : 'Gemma 4'} about one or multiple images
                   </h3>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                    Attach up to 6 images in a single turn to compare subjects, describe outfits, extract visible text, or ask follow-up questions — running 100% locally on Gemma 4 E2B.
+                    Attach up to 6 images in a single turn to compare subjects, describe outfits, extract visible text, or ask follow-up questions — running on {activeEngineLabel}.
                   </p>
                   <button
                     type="button"
@@ -1130,8 +1336,8 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
 
                 <input
                   type="text"
-                  aria-label="Message Gemma 4"
-                  placeholder="Ask Gemma 4 to describe, compare, or analyze attached images..."
+                  aria-label="Message AI vision model"
+                  placeholder={`Ask ${isCustomProvider ? llmSettings.model || 'your LLM' : 'Gemma 4'} to describe, compare, or analyze attached images...`}
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -1555,7 +1761,7 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
                     onClick={() =>
                       triggerTextDownload(
                         buildCaptionsJson(captionResults, {
-                          model: 'Gemma 4 E2B (Open-Source Local)',
+                          model: activeEngineLabel,
                           sourceLabel:
                             captionSourceMode === 'directory'
                               ? scannedDirRoot || dirPathInput
@@ -1590,7 +1796,7 @@ export const GemmaStudio: React.FC<GemmaStudioProps> = ({
                     onClick={() =>
                       triggerTextDownload(
                         buildCaptionsMarkdown(captionResults, {
-                          model: 'Gemma 4 E2B (Open-Source Local)',
+                          model: activeEngineLabel,
                           sourceLabel:
                             captionSourceMode === 'directory'
                               ? scannedDirRoot || dirPathInput
