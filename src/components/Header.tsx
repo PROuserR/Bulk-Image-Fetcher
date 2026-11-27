@@ -6,8 +6,7 @@
  */
 
 import React, { useEffect } from 'react';
-import { Download, Sun, Moon, Command, ChevronRight } from 'lucide-react';
-import brandLogoImg from '../assets/images/framevault_logo_1795790818624.jpg';
+import { Download, Sun, Moon, Command, ChevronRight, Image } from 'lucide-react';
 import { LocalEnginesPopover } from './LocalEnginesPopover';
 import { ExportPresetsPopover } from './ExportPresetsPopover';
 
@@ -88,10 +87,7 @@ export const Header: React.FC<HeaderProps> = ({
             aria-label="FrameVault Home"
           >
             <span className="w-7 h-7 rounded-lg overflow-hidden shrink-0 border border-black/15 dark:border-white/15 bg-[#0B0D12]">
-              <img
-                src={brandLogoImg.src}
-                alt="FrameVault logo"
-                referrerPolicy="no-referrer"
+              <Image
                 className="w-full h-full object-cover"
               />
             </span>
@@ -192,11 +188,10 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => onSelectTab(tab.id)}
               onMouseEnter={() => onPrefetchTab?.(tab.id)}
               onFocus={() => onPrefetchTab?.(tab.id)}
-              className={`relative h-full flex items-center whitespace-nowrap shrink-0 cursor-pointer ${
-                isActive
-                  ? 'text-[#0F141F] dark:text-white font-semibold'
-                  : 'text-slate-500 dark:text-slate-400'
-              }`}
+              className={`relative h-full flex items-center whitespace-nowrap shrink-0 cursor-pointer ${isActive
+                ? 'text-[#0F141F] dark:text-white font-semibold'
+                : 'text-slate-500 dark:text-slate-400'
+                }`}
             >
               {tab.label}
               {isActive && (
