@@ -22,8 +22,6 @@ import {
   Star,
   ZoomIn,
   ZoomOut,
-  Maximize2,
-  Check,
   Download,
   Crop,
   Wand2,
@@ -37,6 +35,9 @@ import {
   GalleryOrientationFilter,
   GallerySortDirection,
   GallerySortField,
+  buildFolderFileSignature,
+  buildUniqueFolderArchivePaths,
+  computeProgressiveRenderCount,
   extractImageFormat,
   extractSubfolderPath,
   filterFolderGalleryItems,
@@ -45,12 +46,22 @@ import {
   getGridColumnClasses,
   getMasonryColumnClasses,
   isSupportedGalleryImageFile,
+  shouldStoreArchiveEntry,
   sortFolderGalleryItems,
   summarizeSubfolders,
 } from '../utils/folderGalleryLogic';
+import {
+  clearLocalFolderBlobs,
+  extractDimensionsAndThumbnail,
+  getCachedThumbnailMeta,
+  registerLocalFolderBlob,
+  resolveFolderItemBlob,
+} from '../utils/folderThumbnailCache';
+import { computeSha256Hex, formatSha256SumsText, type ChecksumEntry } from '../utils/checksumUtils';
 import { formatBytesCompact } from '../utils/imageTransformLogic';
 import { triggerBlobDownload } from '../utils/downloader';
 import { ScrapedImage, classifyResolution, detectFormat } from '../utils/scraperLogic';
+import { FolderGalleryCard } from './FolderGalleryCard';
 import { FolderLightboxModal } from './FolderLightboxModal';
 
 import heroOpticalBenchImg from '../assets/images/hero_optical_bench_1795633734818.jpg';
@@ -186,25 +197,6 @@ const SAMPLE_FOLDER_BLUEPRINT: Array<{
   },
 ];
 
-function probeImageDimensions(src: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    const timer = setTimeout(() => resolve({ width: 0, height: 0 }), 5000);
-    img.onload = () => {
-      clearTimeout(timer);
-      resolve({
-        width: img.naturalWidth || 0,
-        height: img.naturalHeight || 0,
-      });
-    };
-    img.onerror = () => {
-      clearTimeout(timer);
-      resolve({ width: 0, height: 0 });
-    };
-    img.src = src;
-  });
-}
-
 async function readAllDirectoryEntries(
   reader: FileSystemDirectoryReader
 ): Promise<FileSystemEntry[]> {
@@ -287,10 +279,13 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
   const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lightboxItemId, setLightboxItemId] = useState<string | null>(null);
+  const [visibleLimit, setVisibleLimit] = useState<number>(60);
 
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   const objectUrlsRef = useRef<string[]>([]);
+  const ingestGenerationRef = useRef<number>(0);
 
   const revokeStoredObjectUrls = useCallback(() => {
     for (const url of objectUrlsRef.current) {
@@ -301,13 +296,61 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
       }
     }
     objectUrlsRef.current = [];
+    clearLocalFolderBlobs();
   }, []);
 
   useEffect(() => {
     return () => {
+      ingestGenerationRef.current += 1;
       revokeStoredObjectUrls();
     };
   }, [revokeStoredObjectUrls]);
+
+  const runThumbnailHydration = useCallback(
+    async (
+      targets: Array<{ item: FolderGalleryItem; file?: Blob }>,
+      genId: number
+    ) => {
+      const batchSize = 8;
+      for (let i = 0; i < targets.length; i += batchSize) {
+        if (ingestGenerationRef.current !== genId) return;
+        const slice = targets.slice(i, i + batchSize);
+        const resolved = await Promise.all(
+          slice.map(async ({ item, file }) => {
+            const signature = item.fileSignature || item.relativePath || item.id;
+            const meta = await extractDimensionsAndThumbnail({
+              file,
+              previewUrl: item.previewUrl,
+              filename: item.filename,
+              signature,
+            });
+            return { id: item.id, meta };
+          })
+        );
+        if (ingestGenerationRef.current !== genId) return;
+        setItems((prev) => {
+          const map = new Map(resolved.map((r) => [r.id, r.meta]));
+          let changed = false;
+          const next = prev.map((it) => {
+            const match = map.get(it.id);
+            if (!match) return it;
+            const hasDims = match.width > 0 && match.height > 0;
+            const hasThumb = Boolean(match.thumbnailUrl);
+            if (!hasDims && !hasThumb) return it;
+            changed = true;
+            return {
+              ...it,
+              width: hasDims ? match.width : it.width,
+              height: hasDims ? match.height : it.height,
+              thumbnailUrl: match.thumbnailUrl || it.thumbnailUrl,
+            };
+          });
+          return changed ? next : prev;
+        });
+      }
+    },
+    []
+  );
 
   const ingestFileList = useCallback(
     async (fileEntries: DropFileWithPath[], labelHint?: string) => {
@@ -319,11 +362,13 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
         return;
       }
 
+      const genId = ++ingestGenerationRef.current;
       setIsReadingFolder(true);
       revokeStoredObjectUrls();
       setSelectedIds(new Set());
       setLightboxItemId(null);
       setSubfolderFilter('all');
+      setVisibleLimit(60);
 
       const firstPath = imageEntries[0].relativePath || '';
       const rootSegment = firstPath.includes('/') ? firstPath.split('/')[0] : '';
@@ -331,25 +376,44 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
 
       const stamp = Date.now();
       const createdUrls: string[] = [];
+      const pendingDecode: Array<{ item: FolderGalleryItem; file: Blob }> = [];
+      let cacheHits = 0;
 
       const initialItems: FolderGalleryItem[] = imageEntries.map(({ file, relativePath }, idx) => {
         const objUrl = URL.createObjectURL(file);
         createdUrls.push(objUrl);
-        return {
+        const rel = relativePath || file.name;
+        const sizeBytes = file.size || 0;
+        const lastModified = file.lastModified || stamp;
+        const signature = buildFolderFileSignature(rel, sizeBytes, lastModified);
+        const cachedMeta = getCachedThumbnailMeta(signature);
+        if (cachedMeta && cachedMeta.width > 0 && cachedMeta.height > 0) {
+          cacheHits++;
+        }
+
+        const item: FolderGalleryItem = {
           id: `fg_${stamp}_${idx}`,
           filename: file.name,
-          relativePath: relativePath || file.name,
-          subfolder: extractSubfolderPath(relativePath || file.name),
+          relativePath: rel,
+          subfolder: extractSubfolderPath(rel),
           previewUrl: objUrl,
+          thumbnailUrl: cachedMeta?.thumbnailUrl,
+          fileSignature: signature,
           objectUrlToRevoke: objUrl,
-          width: 0,
-          height: 0,
-          sizeBytes: file.size || 0,
-          lastModified: file.lastModified || stamp,
+          width: cachedMeta?.width || 0,
+          height: cachedMeta?.height || 0,
+          sizeBytes,
+          lastModified,
           format: extractImageFormat(file.name, file.type),
           starred: false,
           rotationDeg: 0,
         };
+
+        registerLocalFolderBlob(item.id, file);
+        if (!cachedMeta || cachedMeta.width <= 0 || cachedMeta.height <= 0) {
+          pendingDecode.push({ item, file });
+        }
+        return item;
       });
 
       objectUrlsRef.current = createdUrls;
@@ -357,31 +421,16 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
       setItems(initialItems);
       setIsReadingFolder(false);
       onNotify?.(
-        `Loaded ${initialItems.length} image${initialItems.length === 1 ? '' : 's'} from "${resolvedLabel}".`
+        `Loaded ${initialItems.length} image${initialItems.length === 1 ? '' : 's'} from "${resolvedLabel}"${
+          cacheHits > 0 ? ` (${cacheHits} restored from thumbnail cache)` : ''
+        }.`
       );
 
-      const batchSize = 8;
-      for (let i = 0; i < initialItems.length; i += batchSize) {
-        const slice = initialItems.slice(i, i + batchSize);
-        const dims = await Promise.all(
-          slice.map(async (it) => ({
-            id: it.id,
-            ...(await probeImageDimensions(it.previewUrl)),
-          }))
-        );
-        setItems((prev) => {
-          const map = new Map(dims.map((d) => [d.id, d]));
-          return prev.map((it) => {
-            const match = map.get(it.id);
-            if (match && match.width > 0 && match.height > 0) {
-              return { ...it, width: match.width, height: match.height };
-            }
-            return it;
-          });
-        });
+      if (pendingDecode.length > 0) {
+        await runThumbnailHydration(pendingDecode, genId);
       }
     },
-    [onNotify, revokeStoredObjectUrls]
+    [onNotify, revokeStoredObjectUrls, runThumbnailHydration]
   );
 
   const handleFolderInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -408,6 +457,7 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
   };
 
   const handleLoadSampleFolder = async () => {
+    const genId = ++ingestGenerationRef.current;
     revokeStoredObjectUrls();
     setSelectedIds(new Set());
     setLightboxItemId(null);
@@ -415,44 +465,43 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
     setSearchQuery('');
     setOrientationFilter('all');
     setFavoritesOnly(false);
+    setVisibleLimit(60);
 
     const now = Date.now();
     const dayMs = 86_400_000;
-    const sampleItems: FolderGalleryItem[] = SAMPLE_FOLDER_BLUEPRINT.map((bp, idx) => ({
-      id: `sample_fg_${idx + 1}`,
-      filename: bp.filename,
-      relativePath: `Sample_Shoot/${bp.subfolder}/${bp.filename}`,
-      subfolder: bp.subfolder,
-      previewUrl: bp.previewUrl,
-      width: bp.width,
-      height: bp.height,
-      sizeBytes: bp.sizeBytes,
-      lastModified: now - bp.lastModifiedOffsetDays * dayMs,
-      format: bp.format,
-      starred: Boolean(bp.starred),
-      rotationDeg: 0,
-    }));
+    const sampleItems: FolderGalleryItem[] = SAMPLE_FOLDER_BLUEPRINT.map((bp, idx) => {
+      const rel = `Sample_Shoot/${bp.subfolder}/${bp.filename}`;
+      const lastModified = now - bp.lastModifiedOffsetDays * dayMs;
+      const signature = buildFolderFileSignature(rel, bp.sizeBytes, 1);
+      const cachedMeta = getCachedThumbnailMeta(signature);
+      return {
+        id: `sample_fg_${idx + 1}`,
+        filename: bp.filename,
+        relativePath: rel,
+        subfolder: bp.subfolder,
+        previewUrl: bp.previewUrl,
+        thumbnailUrl: cachedMeta?.thumbnailUrl,
+        fileSignature: signature,
+        width: cachedMeta?.width || bp.width,
+        height: cachedMeta?.height || bp.height,
+        sizeBytes: bp.sizeBytes,
+        lastModified,
+        format: bp.format,
+        starred: Boolean(bp.starred),
+        rotationDeg: 0,
+      };
+    });
 
     setFolderName('Sample_Shoot');
     setItems(sampleItems);
     onNotify?.(`Loaded ${sampleItems.length} sample images across 2 subfolders.`);
 
-    const dims = await Promise.all(
-      sampleItems.map(async (it) => ({
-        id: it.id,
-        ...(await probeImageDimensions(it.previewUrl)),
-      }))
-    );
-    setItems((prev) => {
-      const map = new Map(dims.map((d) => [d.id, d]));
-      return prev.map((it) => {
-        const match = map.get(it.id);
-        if (match && match.width > 0 && match.height > 0) {
-          return { ...it, width: match.width, height: match.height };
-        }
-        return it;
-      });
-    });
+    const uncached = sampleItems
+      .filter((it) => !it.thumbnailUrl)
+      .map((item) => ({ item }));
+    if (uncached.length > 0) {
+      await runThumbnailHydration(uncached, genId);
+    }
   };
 
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
@@ -495,6 +544,7 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
   };
 
   const handleClearGallery = () => {
+    ingestGenerationRef.current += 1;
     revokeStoredObjectUrls();
     setItems([]);
     setFolderName('');
@@ -504,6 +554,7 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
     setSubfolderFilter('all');
     setOrientationFilter('all');
     setFavoritesOnly(false);
+    setVisibleLimit(60);
   };
 
   const handleToggleStar = useCallback((id: string) => {
@@ -534,6 +585,10 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
 
   const subfolders = useMemo(() => summarizeSubfolders(items), [items]);
   const starredCount = useMemo(() => items.filter((i) => i.starred).length, [items]);
+  const cachedThumbsCount = useMemo(
+    () => items.filter((i) => Boolean(i.thumbnailUrl)).length,
+    [items]
+  );
   const totalBytes = useMemo(
     () => items.reduce((acc, it) => acc + (it.sizeBytes || 0), 0),
     [items]
@@ -548,6 +603,32 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
     });
     return sortFolderGalleryItems(filtered, sortField, sortDirection);
   }, [items, searchQuery, subfolderFilter, orientationFilter, favoritesOnly, sortField, sortDirection]);
+
+  const renderedCount = useMemo(
+    () => computeProgressiveRenderCount(visibleItems.length, visibleLimit, 60),
+    [visibleItems.length, visibleLimit]
+  );
+  const renderedItems = useMemo(
+    () => visibleItems.slice(0, renderedCount),
+    [visibleItems, renderedCount]
+  );
+  const hasMoreToRender = renderedCount < visibleItems.length;
+
+  useEffect(() => {
+    if (!hasMoreToRender || typeof IntersectionObserver === 'undefined') return;
+    const node = loadMoreSentinelRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisibleLimit((prev) => prev + 60);
+        }
+      },
+      { rootMargin: '400px 0px' }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMoreToRender, layoutMode]);
 
   const activeLightboxItem = useMemo(
     () => (lightboxItemId ? visibleItems.find((it) => it.id === lightboxItemId) || null : null),
@@ -566,29 +647,64 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
     setIsZipping(true);
     try {
       const zip = new JSZip();
-      const usedPaths = new Set<string>();
+      const archivePaths = buildUniqueFolderArchivePaths(actionTargets);
+      const checksumByIndex: Array<ChecksumEntry | null> = new Array(actionTargets.length).fill(null);
 
-      for (let i = 0; i < actionTargets.length; i++) {
-        const it = actionTargets[i];
-        try {
-          const resp = await fetch(it.previewUrl);
-          if (!resp.ok) continue;
-          const blob = await resp.blob();
-          let targetPath = it.relativePath || it.filename;
-          if (usedPaths.has(targetPath)) {
-            targetPath = `${i + 1}_${it.filename}`;
+      let cursor = 0;
+      const workerCount = Math.min(6, actionTargets.length);
+
+      await Promise.all(
+        Array.from({ length: workerCount }, async () => {
+          while (true) {
+            const idx = cursor++;
+            if (idx >= actionTargets.length) break;
+            const it = actionTargets[idx];
+            const targetPath = archivePaths[idx];
+            try {
+              const blob = await resolveFolderItemBlob(it.id, it.previewUrl);
+              if (!blob || blob.size === 0) continue;
+              const sha256 = await computeSha256Hex(blob).catch(() => '');
+              zip.file(targetPath, blob, {
+                compression: shouldStoreArchiveEntry(targetPath) ? 'STORE' : 'DEFLATE',
+              });
+              if (sha256) {
+                checksumByIndex[idx] = {
+                  id: it.id,
+                  filename: it.filename,
+                  relativePath: targetPath,
+                  sha256,
+                  bytes: blob.size,
+                };
+              }
+            } catch {
+              // skip unreadable items
+            }
           }
-          usedPaths.add(targetPath);
-          zip.file(targetPath, blob);
-        } catch {
-          // skip unreadable items
-        }
+        })
+      );
+
+      const checksumEntries = checksumByIndex.filter(
+        (entry): entry is ChecksumEntry => entry !== null
+      );
+      if (checksumEntries.length === 0) {
+        onNotify?.('No readable images found to package.');
+        return;
       }
 
-      const zipBlob = await zip.generateAsync({ type: 'blob' });
       const safeFolder = (folderName || 'folder_gallery').replace(/[^a-zA-Z0-9_-]+/g, '_');
-      triggerBlobDownload(zipBlob, `${safeFolder}_${actionTargets.length}img.zip`);
-      onNotify?.(`Downloaded ${actionTargets.length} images as .ZIP archive.`);
+      const zipFilename = `${safeFolder}_${checksumEntries.length}img.zip`;
+      const manifestText = formatSha256SumsText(checksumEntries, [
+        `Ultimate Image Processor Folder Gallery Archive (${zipFilename})`,
+        `Images included: ${checksumEntries.length} of ${actionTargets.length}`,
+        `Verify after extraction with: sha256sum -c SHA256SUMS.txt`,
+      ]);
+      zip.file('SHA256SUMS.txt', manifestText, { compression: 'DEFLATE' });
+
+      const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+      triggerBlobDownload(zipBlob, zipFilename);
+      onNotify?.(
+        `Downloaded ${checksumEntries.length} images + SHA256SUMS.txt as .ZIP archive.`
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Could not build ZIP archive.';
       onNotify?.(msg);
@@ -646,6 +762,7 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
                 {visibleItems.length !== items.length ? ` of ${items.length}` : ''} images ·{' '}
                 {subfolders.length} folder{subfolders.length === 1 ? '' : 's'}
                 {totalBytes > 0 ? ` · ${formatBytesCompact(totalBytes)}` : ''}
+                {cachedThumbsCount > 0 ? ` · ${cachedThumbsCount} cached` : ''}
                 {starredCount > 0 ? ` · ${starredCount} starred` : ''}
               </p>
             ) : (
@@ -1058,107 +1175,19 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
               data-testid="folder-gallery-grid"
               className={`grid gap-4 ${getGridColumnClasses(gridZoom)}`}
             >
-              {visibleItems.map((item) => {
-                const isSelected = selectedIds.has(item.id);
-                return (
-                  <article
-                    key={item.id}
-                    className={`group bg-white dark:bg-[#0E121B] border rounded-xl overflow-hidden transition-all duration-150 ${
-                      isSelected
-                        ? 'border-blue-600 ring-2 ring-blue-600/25'
-                        : 'border-[#DCE1EB] dark:border-white/[0.08] hover:border-slate-300 dark:hover:border-white/20'
-                    }`}
-                  >
-                    <div className="relative aspect-[4/3] bg-[#EEF1F6] dark:bg-[#090C12] overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => setLightboxItemId(item.id)}
-                        aria-label={`Open ${item.filename} in viewer`}
-                        className="w-full h-full block cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={item.previewUrl}
-                          alt={item.filename}
-                          referrerPolicy="no-referrer"
-                          loading="lazy"
-                          style={
-                            item.rotationDeg
-                              ? { transform: `rotate(${item.rotationDeg}deg)` }
-                              : undefined
-                          }
-                          className={`w-full h-full transition-transform duration-300 group-hover:scale-[1.03] ${
-                            gridFitMode === 'contain'
-                              ? 'object-contain p-1.5'
-                              : 'object-cover object-[50%_20%]'
-                          }`}
-                        />
-                      </button>
-
-                      {/* Top-left selection toggle */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleSelect(item.id);
-                        }}
-                        aria-label={`Select ${item.filename}`}
-                        aria-pressed={isSelected}
-                        className={`absolute top-2.5 left-2.5 w-6 h-6 rounded-md border flex items-center justify-center transition-opacity cursor-pointer ${
-                          isSelected
-                            ? 'bg-blue-600 border-blue-600 text-white opacity-100'
-                            : 'bg-black/45 border-white/40 text-transparent opacity-0 group-hover:opacity-100 hover:border-white'
-                        }`}
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                      </button>
-
-                      {/* Top-right favorite star toggle */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleStar(item.id);
-                        }}
-                        aria-label={
-                          item.starred
-                            ? `Unstar ${item.filename}`
-                            : `Star ${item.filename}`
-                        }
-                        aria-pressed={item.starred}
-                        className={`absolute top-2.5 right-2.5 w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-xs transition-opacity cursor-pointer ${
-                          item.starred
-                            ? 'bg-amber-500/85 text-white opacity-100'
-                            : 'bg-black/45 text-white/80 opacity-0 group-hover:opacity-100 hover:bg-black/65'
-                        }`}
-                      >
-                        <Star
-                          className={`w-3.5 h-3.5 ${item.starred ? 'fill-white' : ''}`}
-                        />
-                      </button>
-
-                      {/* Subtle measured bottom hover bar */}
-                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-11 bg-gradient-to-t from-black/70 via-black/25 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between px-3 pb-2">
-                        <span className="text-[11px] font-mono text-white/90 truncate">
-                          {item.subfolder}
-                        </span>
-                        <Maximize2 className="w-3.5 h-3.5 text-white/90 shrink-0" />
-                      </div>
-                    </div>
-
-                    <div className="px-3 py-2.5 space-y-0.5">
-                      <div className="text-xs font-semibold text-[#0F141F] dark:text-[#F3F6FA] truncate">
-                        {item.filename}
-                      </div>
-                      <div className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400 truncate">
-                        {item.width > 0 ? `${item.width}×${item.height}` : 'Loading'} ·{' '}
-                        {item.format}
-                        {item.sizeBytes > 0 ? ` · ${formatBytesCompact(item.sizeBytes)}` : ''}
-                      </div>
-                    </div>
-                  </article>
-                );
-              })}
+              {renderedItems.map((item, cardIndex) => (
+                <FolderGalleryCard
+                  key={item.id}
+                  item={item}
+                  cardIndex={cardIndex}
+                  variant="grid"
+                  gridFitMode={gridFitMode}
+                  isSelected={selectedIds.has(item.id)}
+                  onOpenLightbox={setLightboxItemId}
+                  onToggleSelect={handleToggleSelect}
+                  onToggleStar={handleToggleStar}
+                />
+              ))}
             </div>
           ) : layoutMode === 'masonry' ? (
             /* MASONRY WATERFALL VIEW */
@@ -1166,66 +1195,19 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
               data-testid="folder-gallery-masonry"
               className={`gap-4 space-y-4 ${getMasonryColumnClasses(gridZoom)}`}
             >
-              {visibleItems.map((item) => {
-                const isSelected = selectedIds.has(item.id);
-                const aspectRatio =
-                  item.width > 0 && item.height > 0 ? `${item.width} / ${item.height}` : '4 / 3';
-                return (
-                  <article
-                    key={item.id}
-                    className={`break-inside-avoid group bg-white dark:bg-[#0E121B] border rounded-xl overflow-hidden transition-colors ${
-                      isSelected
-                        ? 'border-blue-600 ring-2 ring-blue-600/25'
-                        : 'border-[#DCE1EB] dark:border-white/[0.08]'
-                    }`}
-                  >
-                    <div
-                      className="relative bg-[#EEF1F6] dark:bg-[#090C12] overflow-hidden"
-                      style={{ aspectRatio }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setLightboxItemId(item.id)}
-                        aria-label={`Open ${item.filename} in viewer`}
-                        className="w-full h-full block cursor-zoom-in"
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={item.previewUrl}
-                          alt={item.filename}
-                          referrerPolicy="no-referrer"
-                          loading="lazy"
-                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-                        />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleToggleStar(item.id)}
-                        aria-label={`Star ${item.filename}`}
-                        aria-pressed={item.starred}
-                        className={`absolute top-2.5 right-2.5 w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-xs transition-opacity cursor-pointer ${
-                          item.starred
-                            ? 'bg-amber-500/85 text-white opacity-100'
-                            : 'bg-black/45 text-white/80 opacity-0 group-hover:opacity-100'
-                        }`}
-                      >
-                        <Star
-                          className={`w-3.5 h-3.5 ${item.starred ? 'fill-white' : ''}`}
-                        />
-                      </button>
-                    </div>
-                    <div className="px-3 py-2 flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold text-[#0F141F] dark:text-[#F3F6FA] truncate">
-                        {item.filename}
-                      </span>
-                      <span className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400 shrink-0">
-                        {item.width > 0 ? `${item.width}×${item.height}` : item.format}
-                      </span>
-                    </div>
-                  </article>
-                );
-              })}
+              {renderedItems.map((item, cardIndex) => (
+                <FolderGalleryCard
+                  key={item.id}
+                  item={item}
+                  cardIndex={cardIndex}
+                  variant="masonry"
+                  gridFitMode={gridFitMode}
+                  isSelected={selectedIds.has(item.id)}
+                  onOpenLightbox={setLightboxItemId}
+                  onToggleSelect={handleToggleSelect}
+                  onToggleStar={handleToggleStar}
+                />
+              ))}
             </div>
           ) : (
             /* LIST DETAILS VIEW */
@@ -1247,7 +1229,7 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#DCE1EB]/70 dark:divide-white/[0.06]">
-                  {visibleItems.map((item) => {
+                  {renderedItems.map((item) => {
                     const isSelected = selectedIds.has(item.id);
                     return (
                       <tr
@@ -1271,9 +1253,11 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
-                              src={item.previewUrl}
+                              src={item.thumbnailUrl || item.previewUrl}
                               alt={item.filename}
                               referrerPolicy="no-referrer"
+                              loading="lazy"
+                              decoding="async"
                               className="w-9 h-9 rounded-lg object-cover shrink-0 bg-[#EEF1F6] dark:bg-[#090C12]"
                             />
                             <span className="font-semibold text-[#0F141F] dark:text-[#F3F6FA] group-hover:text-blue-600 dark:group-hover:text-blue-400 truncate max-w-[220px]">
@@ -1327,6 +1311,32 @@ export const FolderGalleryStudio: React.FC<FolderGalleryStudioProps> = ({
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Progressive batch loader sentinel for large directories */}
+          {hasMoreToRender && (
+            <div
+              ref={loadMoreSentinelRef}
+              className="flex items-center justify-center gap-3 py-4 text-xs text-slate-500 dark:text-slate-400"
+            >
+              <span className="font-mono tabular-nums">
+                Showing {renderedCount} of {visibleItems.length}
+              </span>
+              <button
+                type="button"
+                onClick={() => setVisibleLimit((prev) => prev + 120)}
+                className="px-3.5 py-1.5 rounded-lg bg-[#F4F6F9] dark:bg-white/[0.06] border border-[#DCE1EB] dark:border-white/[0.1] font-semibold text-[#0F141F] dark:text-slate-100 hover:border-blue-500 transition-colors cursor-pointer"
+              >
+                Load More
+              </button>
+              <button
+                type="button"
+                onClick={() => setVisibleLimit(visibleItems.length)}
+                className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors cursor-pointer"
+              >
+                Show All ({visibleItems.length})
+              </button>
             </div>
           )}
         </>

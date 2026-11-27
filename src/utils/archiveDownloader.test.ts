@@ -154,3 +154,105 @@ test('downloadCompressedArchiveWithProgress packages browser-cached images into 
     clearClientImageCache();
   }
 });
+
+test('downloadCompressedArchiveWithProgress uploads cached browser blobs via FormData for .7z archives', async () => {
+  clearClientImageCache();
+  const cachedUrl = 'https://cdn.example.com/cached-7z-1.jpg';
+  const uncachedUrl = 'https://cdn.example.com/uncached-7z-2.jpg';
+  setCachedImageBlob(cachedUrl, new Blob([new Uint8Array(180).fill(9)], { type: 'image/jpeg' }));
+
+  const prevFetch = globalThis.fetch;
+  let capturedFormData: FormData | null = null;
+  let savedName = '';
+  let savedBlob: Blob | null = null;
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(input);
+    if (u === '/api/download-zip' && init?.method === 'POST') {
+      assert.ok(init.body instanceof FormData, 'Expected FormData multipart body when browser blobs are cached for .7z');
+      capturedFormData = init.body;
+      const ndjson =
+        JSON.stringify({ stage: 'fetching', fetchedCount: 2, totalCount: 2, validCount: 2, bytesFetched: 400, percent: 55 }) +
+        '\n' +
+        JSON.stringify({
+          stage: 'ready',
+          token: '11111111-1111-4111-8111-111111111111',
+          filename: 'Cached7z.7z',
+          format: '7z',
+          contentType: 'application/x-7z-compressed',
+          totalBytes: 128,
+          fileCount: 2,
+          percent: 85,
+        }) +
+        '\n';
+      return new Response(ndjson, {
+        status: 200,
+        headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' },
+      });
+    }
+    if (u.includes('/api/download-zip?token=')) {
+      return new Response(new Uint8Array(128).fill(7), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/x-7z-compressed',
+          'Content-Length': '128',
+        },
+      });
+    }
+    if (u.includes('/api/download-zip?token=') === false && init?.method === 'DELETE') {
+      return new Response(JSON.stringify({ deleted: true }), { status: 200 });
+    }
+    return new Response(null, { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    const result = await downloadCompressedArchiveWithProgress({
+      images: [
+        {
+          id: '1',
+          fullUrl: cachedUrl,
+          thumbnailUrl: cachedUrl,
+          filename: 'cached-7z-1.jpg',
+          altText: 'Cached',
+          format: 'jpg',
+          resolutionTier: 'hd',
+          isUnshrunk: true,
+          unshrinkMethod: 'Direct Master',
+        },
+        {
+          id: '2',
+          fullUrl: uncachedUrl,
+          thumbnailUrl: uncachedUrl,
+          filename: 'uncached-7z-2.jpg',
+          altText: 'Uncached',
+          format: 'jpg',
+          resolutionTier: 'hd',
+          isUnshrunk: true,
+          unshrinkMethod: 'Direct Master',
+        },
+      ],
+      pageTitle: 'Cached7z',
+      sourceUrl: 'https://example.com',
+      format: '7z',
+      saveBlobFn: (blob, filename) => {
+        savedBlob = blob;
+        savedName = filename;
+      },
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.format, '7z');
+    assert.equal(result.usedBrowserCache, true);
+    assert.equal(result.reusedFromCacheCount, 1);
+    assert.equal(savedName, 'Cached7z.7z');
+    assert.ok(savedBlob && (savedBlob as Blob).size === 128);
+    assert.ok(capturedFormData, 'FormData should have been posted');
+    assert.ok(capturedFormData!.get('metadata'));
+    assert.ok(capturedFormData!.get('cached_0'), 'Expected cached_0 binary part in FormData');
+    assert.equal(capturedFormData!.get('cached_1'), null, 'Uncached index 1 should not be uploaded');
+  } finally {
+    globalThis.fetch = prevFetch;
+    clearClientImageCache();
+  }
+});
+

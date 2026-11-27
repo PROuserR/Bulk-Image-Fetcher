@@ -202,3 +202,48 @@ test('resolveSeededPreviewUrl reuses already-loaded blob cache and working proxy
   clearClientImageCache();
 });
 
+import {
+  buildFolderFileSignature,
+  buildUniqueFolderArchivePaths,
+  computeProgressiveRenderCount,
+  computeThumbnailDimensions,
+  shouldStoreArchiveEntry,
+} from './folderGalleryLogic';
+
+test('buildFolderFileSignature, computeThumbnailDimensions, and computeProgressiveRenderCount optimize Folder Gallery', () => {
+  assert.equal(
+    buildFolderFileSignature('\\Shoot\\Day1\\IMG_01.jpg', 204800, 1700000000000),
+    'Shoot/Day1/IMG_01.jpg::204800::1700000000000'
+  );
+
+  assert.deepEqual(computeThumbnailDimensions(4000, 3000, 480), { width: 480, height: 360 });
+  assert.deepEqual(computeThumbnailDimensions(1080, 1920, 480), { width: 270, height: 480 });
+  // Never upscale small images
+  assert.deepEqual(computeThumbnailDimensions(320, 240, 480), { width: 320, height: 240 });
+
+  assert.equal(computeProgressiveRenderCount(0, 60, 60), 0);
+  assert.equal(computeProgressiveRenderCount(25, 60, 60), 25);
+  assert.equal(computeProgressiveRenderCount(250, 60, 60), 60);
+  assert.equal(computeProgressiveRenderCount(250, 180, 60), 180);
+  assert.equal(computeProgressiveRenderCount(250, 500, 60), 250);
+});
+
+test('shouldStoreArchiveEntry and buildUniqueFolderArchivePaths handle compression hints and duplicates', () => {
+  assert.equal(shouldStoreArchiveEntry('Portraits/IMG_01.jpg'), true);
+  assert.equal(shouldStoreArchiveEntry('renders/hero.webp'), true);
+  assert.equal(shouldStoreArchiveEntry('vector/icon.svg'), false);
+  assert.equal(shouldStoreArchiveEntry('SHA256SUMS.txt'), false);
+
+  const paths = buildUniqueFolderArchivePaths([
+    { filename: 'photo.jpg', relativePath: 'Trip/photo.jpg' },
+    { filename: 'photo.jpg', relativePath: 'Trip/photo.jpg' },
+    { filename: 'photo.jpg', relativePath: 'Trip/Sub/photo.jpg' },
+  ]);
+  assert.deepEqual(paths, [
+    'Trip/photo.jpg',
+    'Trip/photo_1.jpg',
+    'Trip/Sub/photo.jpg',
+  ]);
+});
+
+

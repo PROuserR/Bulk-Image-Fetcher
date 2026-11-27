@@ -129,6 +129,43 @@ export async function DELETE(req: NextRequest) {
   return NextResponse.json({ deleted: true });
 }
 
+interface ParsedArchivePayload {
+  body: Record<string, any>;
+  preloadedBuffers: Map<number, Buffer>;
+}
+
+async function parseArchiveRequestPayload(req: NextRequest): Promise<ParsedArchivePayload> {
+  const ct = (req.headers.get('content-type') || '').toLowerCase();
+  const preloadedBuffers = new Map<number, Buffer>();
+
+  if (ct.includes('multipart/form-data')) {
+    const formData = await req.formData();
+    const rawMeta = formData.get('metadata');
+    let body: Record<string, any> = {};
+    if (typeof rawMeta === 'string') {
+      try {
+        body = JSON.parse(rawMeta);
+      } catch {
+        body = {};
+      }
+    }
+    for (const [key, val] of formData.entries()) {
+      const match = /^cached_(\d+)$/.exec(key);
+      if (match && typeof val !== 'string' && typeof (val as Blob).arrayBuffer === 'function') {
+        const idx = parseInt(match[1], 10);
+        const buf = Buffer.from(await (val as Blob).arrayBuffer());
+        if (buf.length > 0) {
+          preloadedBuffers.set(idx, buf);
+        }
+      }
+    }
+    return { body, preloadedBuffers };
+  }
+
+  const body = await req.json().catch(() => ({}));
+  return { body: body || {}, preloadedBuffers };
+}
+
 /**
  * POST /api/download-zip
  * Resolves full-resolution image buffers, packages them as LZMA2 `.7z` or `.zip`,
@@ -137,7 +174,7 @@ export async function DELETE(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+    const { body, preloadedBuffers } = await parseArchiveRequestPayload(req);
     const {
       images,
       referer,
@@ -177,7 +214,7 @@ export async function POST(req: NextRequest) {
       }
       const uniqueFile = ensureUniqueFilename(rawName, folderSeen);
       const uniqueName = folderKey ? `${folderKey}/${uniqueFile}` : uniqueFile;
-      return { item, onlyFullRes, rawUrl, uniqueName };
+      return { idx, item, onlyFullRes, rawUrl, uniqueName };
     });
 
     const resolveDetailUrl = async (detailUrl: string): Promise<string | null> => {
@@ -218,7 +255,31 @@ export async function POST(req: NextRequest) {
         plannedTasks.map((task) =>
           limit(async (): Promise<HashedArchiveEntry | null> => {
             if (signal?.aborted) return null;
-            const { item, onlyFullRes, rawUrl, uniqueName } = task;
+            const { idx, item, onlyFullRes, rawUrl, uniqueName } = task;
+            const baseFilename = uniqueName.includes('/')
+              ? uniqueName.slice(uniqueName.lastIndexOf('/') + 1)
+              : uniqueName;
+
+            const preloaded = preloadedBuffers.get(idx);
+            if (preloaded && preloaded.length > 0) {
+              fetchedCount++;
+              validCount++;
+              bytesFetched += preloaded.length;
+              const sha256 = crypto.createHash('sha256').update(preloaded).digest('hex');
+              onImageDone?.({ fetchedCount, totalCount, validCount, bytesFetched, filename: uniqueName });
+              return {
+                entry: { path: uniqueName, data: preloaded },
+                checksum: {
+                  filename: baseFilename,
+                  relativePath: uniqueName,
+                  sha256,
+                  bytes: preloaded.length,
+                  url: item.url,
+                  resolvedVia: 'browser-cache',
+                },
+              };
+            }
+
             if (!rawUrl) {
               fetchedCount++;
               onImageDone?.({ fetchedCount, totalCount, validCount, bytesFetched, filename: uniqueName });
@@ -263,9 +324,6 @@ export async function POST(req: NextRequest) {
               validCount++;
               bytesFetched += result.buf.length;
               const sha256 = crypto.createHash('sha256').update(result.buf).digest('hex');
-              const baseFilename = uniqueName.includes('/')
-                ? uniqueName.slice(uniqueName.lastIndexOf('/') + 1)
-                : uniqueName;
               onImageDone?.({ fetchedCount, totalCount, validCount, bytesFetched, filename: uniqueName });
               return {
                 entry: { path: uniqueName, data: result.buf },

@@ -36,6 +36,8 @@ export interface FolderGalleryItem {
   relativePath: string;
   subfolder: string; // 'Root' or 'Sub/Path'
   previewUrl: string;
+  thumbnailUrl?: string;
+  fileSignature?: string;
   objectUrlToRevoke?: string;
   width: number;
   height: number;
@@ -304,3 +306,85 @@ export function resolveSeededPreviewUrl(url: string, referer?: string): string {
   return buildProxyImageUrl(trimmed, referer || '');
 }
 
+const ALREADY_COMPRESSED_ARCHIVE_EXT_RE = /\.(?:jpe?g|png|webp|avif|gif|heic|mp4|webm|7z|zip)$/i;
+
+/** Returns true when an archive entry is already compressed and should use ZIP STORE (zero re-compression). */
+export function shouldStoreArchiveEntry(filename: string): boolean {
+  return ALREADY_COMPRESSED_ARCHIVE_EXT_RE.test((filename || '').trim());
+}
+
+/** Deterministic signature key for caching local folder thumbnails & dimensions across re-picks. */
+export function buildFolderFileSignature(
+  relativePath: string,
+  sizeBytes: number,
+  lastModified: number
+): string {
+  const normalizedPath = (relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  return `${normalizedPath}::${Math.max(0, Math.round(sizeBytes || 0))}::${Math.max(0, Math.round(lastModified || 0))}`;
+}
+
+/** Computes aspect-preserving thumbnail dimensions bounded to `maxEdge`, never upscaling smaller images. */
+export function computeThumbnailDimensions(
+  width: number,
+  height: number,
+  maxEdge = 480
+): { width: number; height: number } {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return { width: 0, height: 0 };
+  }
+  const safeMax = Math.max(64, Math.round(maxEdge));
+  const longest = Math.max(width, height);
+  if (longest <= safeMax) {
+    return { width: Math.round(width), height: Math.round(height) };
+  }
+  const scale = safeMax / longest;
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+/** Computes bounded item count for progressive DOM rendering of large folders. */
+export function computeProgressiveRenderCount(
+  totalCount: number,
+  requestedLimit: number,
+  initialBatch = 60
+): number {
+  if (!Number.isFinite(totalCount) || totalCount <= 0) return 0;
+  const minFloor = Math.max(1, Math.round(initialBatch));
+  const target = Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.round(requestedLimit) : minFloor;
+  return Math.min(totalCount, Math.max(minFloor, target));
+}
+
+/** Assigns collision-free relative paths when packaging Folder Gallery selections into an archive. */
+export function buildUniqueFolderArchivePaths(
+  items: Array<Pick<FolderGalleryItem, 'filename' | 'relativePath'>>
+): string[] {
+  const used = new Set<string>();
+  return items.map((item, idx) => {
+    const rawRel = (item.relativePath || item.filename || `image_${idx + 1}.jpg`)
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '');
+    const normalized = rawRel || `image_${idx + 1}.jpg`;
+    if (!used.has(normalized.toLowerCase())) {
+      used.add(normalized.toLowerCase());
+      return normalized;
+    }
+
+    const slashIdx = normalized.lastIndexOf('/');
+    const dir = slashIdx !== -1 ? normalized.slice(0, slashIdx + 1) : '';
+    const baseName = slashIdx !== -1 ? normalized.slice(slashIdx + 1) : normalized;
+    const dotIdx = baseName.lastIndexOf('.');
+    const stem = dotIdx !== -1 ? baseName.slice(0, dotIdx) : baseName;
+    const ext = dotIdx !== -1 ? baseName.slice(dotIdx) : '';
+
+    let counter = 1;
+    let candidate = `${dir}${stem}_${counter}${ext}`;
+    while (used.has(candidate.toLowerCase())) {
+      counter++;
+      candidate = `${dir}${stem}_${counter}${ext}`;
+    }
+    used.add(candidate.toLowerCase());
+    return candidate;
+  });
+}

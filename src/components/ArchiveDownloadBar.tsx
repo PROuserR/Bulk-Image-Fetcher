@@ -75,6 +75,7 @@ export const ArchiveDownloadBar: React.FC<ArchiveDownloadBarProps> = ({
     archiveSha256,
     checksumEntries,
     skippedCount,
+    reusedFromCacheCount,
   } = progress;
 
   const isSuccess = stage === 'complete';
@@ -169,6 +170,11 @@ export const ArchiveDownloadBar: React.FC<ArchiveDownloadBarProps> = ({
                   }
                 >
                   · {validImages}/{totalImages} images verified
+                </span>
+              )}
+              {(reusedFromCacheCount ?? 0) > 0 && (
+                <span className="text-blue-600 dark:text-blue-400 font-semibold">
+                  · {reusedFromCacheCount} cached
                 </span>
               )}
               {isSuccess && archiveSha256 && (

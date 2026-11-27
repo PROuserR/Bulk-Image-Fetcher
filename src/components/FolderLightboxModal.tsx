@@ -31,6 +31,7 @@ import {
 } from '../utils/folderGalleryLogic';
 import { formatBytesCompact } from '../utils/imageTransformLogic';
 import { triggerBlobDownload } from '../utils/downloader';
+import { resolveFolderItemBlob } from '../utils/folderThumbnailCache';
 
 interface FolderLightboxModalProps {
   item: FolderGalleryItem | null;
@@ -68,11 +69,27 @@ export const FolderLightboxModal: React.FC<FolderLightboxModalProps> = ({
     onSelectItem(items[nextIdx]);
   };
 
-  // Reset zoom & pan whenever active item changes
+  // Reset zoom & pan whenever active item changes, and preload adjacent slides
   useEffect(() => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
-  }, [item?.id]);
+    if (!item || items.length <= 1 || typeof Image === 'undefined') return;
+    const idx = items.findIndex((i) => i.id === item.id);
+    if (idx === -1) return;
+    const neighborIndices = [
+      (idx + 1) % items.length,
+      (idx - 1 + items.length) % items.length,
+    ];
+    for (const ni of neighborIndices) {
+      if (ni === idx) continue;
+      const target = items[ni];
+      if (target?.previewUrl) {
+        const preloader = new Image();
+        preloader.decoding = 'async';
+        preloader.src = target.previewUrl;
+      }
+    }
+  }, [item, items]);
 
   // Slideshow timer (3 seconds per slide)
   useEffect(() => {
@@ -203,9 +220,15 @@ export const FolderLightboxModal: React.FC<FolderLightboxModalProps> = ({
 
   const handleDownloadCurrent = async () => {
     try {
-      const resp = await fetch(item.previewUrl);
-      const blob = await resp.blob();
-      triggerBlobDownload(blob, item.filename);
+      const cachedOrLocalBlob = await resolveFolderItemBlob(item.id, item.previewUrl);
+      if (cachedOrLocalBlob) {
+        triggerBlobDownload(cachedOrLocalBlob, item.filename);
+        return;
+      }
+      const a = document.createElement('a');
+      a.href = item.previewUrl;
+      a.download = item.filename;
+      a.click();
     } catch {
       const a = document.createElement('a');
       a.href = item.previewUrl;
@@ -534,9 +557,11 @@ export const FolderLightboxModal: React.FC<FolderLightboxModalProps> = ({
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={thumb.previewUrl}
+                  src={thumb.thumbnailUrl || thumb.previewUrl}
                   alt={thumb.filename}
                   referrerPolicy="no-referrer"
+                  loading="lazy"
+                  decoding="async"
                   className="w-full h-full object-cover"
                 />
               </button>

@@ -6,7 +6,6 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import dynamic from 'next/dynamic';
 import { MotionConfig } from 'motion/react';
 import { Header, WorkspaceTabId } from './components/Header';
 import { StudioSidebar } from './components/StudioSidebar';
@@ -21,181 +20,21 @@ import {
   NestedCrawlProgressState,
 } from './components/NestedGalleryQueue';
 import { GalleryView } from './components/GalleryView';
+import { FolderGalleryStudio } from './components/FolderGalleryStudio';
+import { CropResizeStudio } from './components/CropResizeStudio';
+import { FilterStudio } from './components/FilterStudio';
+import { GifMakerStudio } from './components/GifMakerStudio';
+import { HumanClassifierStudio } from './components/HumanClassifierStudio';
+import { GemmaStudio } from './components/GemmaStudio';
+import { DeploymentDocs } from './components/DeploymentDocs';
+import { LightboxModal } from './components/LightboxModal';
+import { CommandPalette } from './components/CommandPalette';
+import { ChecksumVerifierModal } from './components/ChecksumVerifierModal';
 import {
   ScrapedImage,
   FaceScanResult,
   isBlankOrPlaceholderUrl,
 } from './utils/scraperLogic';
-
-const StudioTabSkeleton = () => (
-  <div
-    aria-label="Loading studio"
-    className="bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] rounded-2xl p-6 space-y-4 animate-pulse"
-  >
-    <div className="h-6 w-52 bg-[#EEF1F6] dark:bg-slate-800 rounded-md" />
-    <div className="h-4 w-80 max-w-full bg-[#F4F6F9] dark:bg-slate-800/70 rounded" />
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-      <div className="h-40 bg-[#EEF1F6]/80 dark:bg-slate-800/40 rounded-xl" />
-      <div className="h-40 bg-[#EEF1F6]/80 dark:bg-slate-800/40 rounded-xl md:col-span-2" />
-    </div>
-  </div>
-);
-
-function StudioChunkFallback({ studioName }: { studioName: string }) {
-  return (
-    <div className="bg-white dark:bg-[#0E121B] border border-[#DCE1EB] dark:border-white/[0.08] rounded-2xl p-6 space-y-3">
-      <h2 className="font-display text-base font-bold text-[#0F141F] dark:text-[#F3F6FA]">
-        {studioName} updated on server
-      </h2>
-      <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-        A newer bundle was compiled after this page loaded. Reload to fetch the latest studio module.
-      </p>
-      <button
-        type="button"
-        onClick={() => window.location.reload()}
-        className="inline-flex items-center px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer"
-      >
-        Reload Studio
-      </button>
-    </div>
-  );
-}
-
-function loadStudioWithRetry<P extends object>(
-  importer: () => Promise<React.ComponentType<P>>,
-  studioName: string
-): () => Promise<React.ComponentType<P>> {
-  return async () => {
-    try {
-      return await importer();
-    } catch {
-      await new Promise((r) => setTimeout(r, 250));
-      try {
-        return await importer();
-      } catch {
-        const Fallback: React.FC<P> = () => <StudioChunkFallback studioName={studioName} />;
-        return Fallback;
-      }
-    }
-  };
-}
-
-const loadFolderGalleryStudio = loadStudioWithRetry(
-  () => import('./components/FolderGalleryStudio').then((m) => m.FolderGalleryStudio),
-  'Folder Gallery'
-);
-const loadCropResizeStudio = loadStudioWithRetry(
-  () => import('./components/CropResizeStudio').then((m) => m.CropResizeStudio),
-  'Crop & Resize'
-);
-const loadFilterStudio = loadStudioWithRetry(
-  () => import('./components/FilterStudio').then((m) => m.FilterStudio),
-  'Filter & Lenses'
-);
-const loadGifMakerStudio = loadStudioWithRetry(
-  () => import('./components/GifMakerStudio').then((m) => m.GifMakerStudio),
-  'GIF89a Motion'
-);
-const loadHumanClassifierStudio = loadStudioWithRetry(
-  () => import('./components/HumanClassifierStudio').then((m) => m.HumanClassifierStudio),
-  'Face & ID Sort'
-);
-const loadGemmaStudio = loadStudioWithRetry(
-  () => import('./components/GemmaStudio').then((m) => m.GemmaStudio),
-  'Gemma 4 Vision'
-);
-const loadDeploymentDocs = loadStudioWithRetry(
-  () => import('./components/DeploymentDocs').then((m) => m.DeploymentDocs),
-  'Setup & Runtime'
-);
-const loadLightboxModal = () =>
-  import('./components/LightboxModal')
-    .then((m) => m.LightboxModal)
-    .catch(() => (() => null) as React.FC<any>);
-const loadCommandPalette = () =>
-  import('./components/CommandPalette')
-    .then((m) => m.CommandPalette)
-    .catch(() => (() => null) as React.FC<any>);
-const loadChecksumVerifierModal = () =>
-  import('./components/ChecksumVerifierModal')
-    .then((m) => m.ChecksumVerifierModal)
-    .catch(() => (() => null) as React.FC<any>);
-
-const FolderGalleryStudio = dynamic(loadFolderGalleryStudio, {
-  ssr: false,
-  loading: StudioTabSkeleton,
-});
-const CropResizeStudio = dynamic(loadCropResizeStudio, {
-  ssr: false,
-  loading: StudioTabSkeleton,
-});
-const FilterStudio = dynamic(loadFilterStudio, {
-  ssr: false,
-  loading: StudioTabSkeleton,
-});
-const GifMakerStudio = dynamic(loadGifMakerStudio, {
-  ssr: false,
-  loading: StudioTabSkeleton,
-});
-const HumanClassifierStudio = dynamic(loadHumanClassifierStudio, {
-  ssr: false,
-  loading: StudioTabSkeleton,
-});
-const GemmaStudio = dynamic(loadGemmaStudio, {
-  ssr: false,
-  loading: StudioTabSkeleton,
-});
-const DeploymentDocs = dynamic(loadDeploymentDocs, {
-  ssr: false,
-  loading: StudioTabSkeleton,
-});
-const LightboxModal = dynamic(loadLightboxModal, {
-  ssr: false,
-  loading: () => null,
-});
-const CommandPalette = dynamic(loadCommandPalette, {
-  ssr: false,
-  loading: () => null,
-});
-const ChecksumVerifierModal = dynamic(loadChecksumVerifierModal, {
-  ssr: false,
-  loading: () => null,
-});
-
-const prefetchedChunks = new Set<WorkspaceTabId>();
-
-function prefetchTabChunk(tab: WorkspaceTabId) {
-  if (prefetchedChunks.has(tab)) return;
-  prefetchedChunks.add(tab);
-  const run = (loader: () => Promise<unknown>) => {
-    void loader().catch(() => {
-      prefetchedChunks.delete(tab);
-    });
-  };
-  switch (tab) {
-    case 'gallery':
-      run(loadFolderGalleryStudio);
-      break;
-    case 'crop':
-      run(loadCropResizeStudio);
-      break;
-    case 'filters':
-      run(loadFilterStudio);
-      break;
-    case 'gif':
-      run(loadGifMakerStudio);
-      break;
-    case 'classifier':
-      run(loadHumanClassifierStudio);
-      break;
-    case 'gemma':
-      run(loadGemmaStudio);
-      break;
-    case 'docs':
-      run(loadDeploymentDocs);
-      break;
-  }
-}
 import {
   DiscoveredGallery,
   NestedGallerySummary,
@@ -681,13 +520,6 @@ export default function App() {
       // ignore storage restrictions
     }
   }, [theme, themeHydrated]);
-
-  // Warm Lightbox chunk once gallery cards appear
-  useEffect(() => {
-    if (images.length > 0) {
-      void loadLightboxModal().catch(() => {});
-    }
-  }, [images.length]);
 
   // Global Cmd/Ctrl+K command palette + 1-7 studio switcher shortcuts
   useEffect(() => {
@@ -2005,7 +1837,6 @@ export default function App() {
         <StudioSidebar
           activeTab={activeTab}
           onSelectTab={handleSelectTab}
-          onPrefetchTab={prefetchTabChunk}
           onOpenCommandPalette={() => {
             setHasOpenedCommandPalette(true);
             setIsCommandPaletteOpen(true);
@@ -2020,7 +1851,6 @@ export default function App() {
             onToggleTheme={toggleTheme}
             activeTab={activeTab}
             onSelectTab={handleSelectTab}
-            onPrefetchTab={prefetchTabChunk}
             onOpenCommandPalette={() => {
               setHasOpenedCommandPalette(true);
               setIsCommandPaletteOpen(true);

@@ -1,6 +1,7 @@
 'use client';
 
-import dynamic from 'next/dynamic';
+import { useEffect, useState } from 'react';
+import App from '@/App';
 
 const WorkstationLoadingShell = () => (
   <div className="min-h-screen flex text-[#0F141F] dark:text-[#F3F6FA] font-sans">
@@ -42,11 +43,16 @@ const WorkstationLoadingShell = () => (
   </div>
 );
 
-const DynamicApp = dynamic(() => import('@/App'), {
-  ssr: false,
-  loading: WorkstationLoadingShell,
-});
-
 export function ClientAppMount() {
-  return <DynamicApp />;
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return <WorkstationLoadingShell />;
+  }
+
+  return <App />;
 }

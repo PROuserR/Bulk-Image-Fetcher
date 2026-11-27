@@ -18,7 +18,14 @@ import {
   isCacheResolvedVia,
   type FetchLike,
 } from './progressiveDownloader';
-import { countReusableBrowserImages } from './clientImageCache';
+import {
+  captureFullResBlobFromLoadedDomImage,
+  countReusableBrowserImages,
+  getCachedImageBlob,
+  getFullResReusablePreviewUrl,
+  isSameOriginOrLocalImageUrl,
+  setCachedImageBlob,
+} from './clientImageCache';
 import { sanitizeGalleryFolderName } from './nestedGalleryLogic';
 import {
   computeSha256Hex,
@@ -169,6 +176,74 @@ export function cleanupStagedArchiveToken(token?: string): void {
   void fetch(`/api/download-zip?token=${encodeURIComponent(token)}`, {
     method: 'DELETE',
   }).catch(() => {});
+}
+
+const SERVER_ARCHIVE_CACHED_UPLOAD_BUDGET_BYTES = 48 * 1024 * 1024; // 48 MB cap for multipart cached uploads
+
+/**
+ * Collects full-resolution `Blob`s already loaded in the browser (memory cache, HTTP force-cache,
+ * or untainted DOM `<img>`) up to a bounded byte budget so server-side `.7z` compression can skip
+ * duplicate remote downloads.
+ */
+async function collectReusableBrowserBlobsForServerArchive(
+  images: ScrapedImage[],
+  fetchFn?: FetchLike,
+  signal?: AbortSignal
+): Promise<{ blobsByIndex: Map<number, Blob>; totalBytes: number }> {
+  const blobsByIndex = new Map<number, Blob>();
+  let totalBytes = 0;
+
+  for (let idx = 0; idx < images.length; idx++) {
+    if (signal?.aborted) break;
+    if (totalBytes >= SERVER_ARCHIVE_CACHED_UPLOAD_BUDGET_BYTES) break;
+
+    const img = images[idx];
+    if (!img?.fullUrl) continue;
+
+    let blob = getCachedImageBlob(img.fullUrl);
+
+    if (!blob) {
+      const previewUrl = getFullResReusablePreviewUrl(img.fullUrl);
+      if (previewUrl) {
+        try {
+          const fetcher = fetchFn || (typeof fetch === 'function' ? (fetch as unknown as FetchLike) : null);
+          if (fetcher) {
+            const init: RequestInit = isSameOriginOrLocalImageUrl(previewUrl)
+              ? { cache: 'force-cache', signal }
+              : { mode: 'cors', cache: 'force-cache', signal };
+            const resp = await fetcher(previewUrl, init);
+            if (resp.ok) {
+              const ct = (resp.headers?.get?.('content-type') || '').toLowerCase();
+              if (!ct.includes('text/html') && !ct.includes('application/json')) {
+                const candidate = await resp.blob();
+                if (candidate && candidate.size > 0) {
+                  setCachedImageBlob(img.fullUrl, candidate);
+                  blob = candidate;
+                }
+              }
+            }
+          }
+        } catch {
+          // ignore cache miss
+        }
+      }
+    }
+
+    if (!blob && !fetchFn) {
+      blob = await captureFullResBlobFromLoadedDomImage(img.fullUrl, img.id);
+    }
+
+    if (
+      blob &&
+      blob.size > 0 &&
+      totalBytes + blob.size <= SERVER_ARCHIVE_CACHED_UPLOAD_BUDGET_BYTES
+    ) {
+      blobsByIndex.set(idx, blob);
+      totalBytes += blob.size;
+    }
+  }
+
+  return { blobsByIndex, totalBytes };
 }
 
 async function readResponseWithDownloadProgress(
@@ -340,6 +415,7 @@ export async function downloadCompressedArchiveWithProgress(
   }
 
   let serverError: string | null = null;
+  let serverReusedCacheCount = 0;
   const cacheStats =
     !readyPayload && format === 'zip' ? countReusableBrowserImages(images) : null;
   const shouldPackageLocallyFromCache = Boolean(cacheStats && cacheStats.reusableCount > 0);
@@ -367,25 +443,60 @@ export async function downloadCompressedArchiveWithProgress(
       }
 
       try {
+        const cachedForServer =
+          typeof FormData !== 'undefined'
+            ? await collectReusableBrowserBlobsForServerArchive(
+                images,
+                fetchFn,
+                streamController.signal
+              )
+            : { blobsByIndex: new Map<number, Blob>(), totalBytes: 0 };
+
+        serverReusedCacheCount = cachedForServer.blobsByIndex.size;
+        const metadataPayload = {
+          images: images.map((img) => ({
+            url: img.fullUrl,
+            fallbackUrl: img.fallbackUrl,
+            linkedPageUrl: img.linkedPageUrl,
+            filename: img.filename,
+            galleryTitle: img.galleryTitle,
+            galleryId: img.galleryId,
+          })),
+          archiveName: pageTitle,
+          referer: sourceUrl,
+          relayUrl: relayUrl.trim() || undefined,
+          format,
+          onlyFullRes,
+          streamProgress: true,
+        };
+
+        let requestBody: BodyInit;
+        const requestHeaders: Record<string, string> = {};
+
+        if (serverReusedCacheCount > 0) {
+          emit({
+            stage: 'connecting',
+            percent: Math.max(2, resumeState?.percent ?? 2),
+            usedBrowserCache: true,
+            reusedFromCacheCount: serverReusedCacheCount,
+            message: `Reusing ${serverReusedCacheCount}/${images.length} cached images for .${formatUpper}...`,
+          });
+          const formData = new FormData();
+          formData.append('metadata', JSON.stringify(metadataPayload));
+          for (const [idx, blob] of cachedForServer.blobsByIndex.entries()) {
+            const safeName = images[idx]?.filename || `cached_${idx}.jpg`;
+            formData.append(`cached_${idx}`, blob, safeName);
+          }
+          requestBody = formData;
+        } else {
+          requestHeaders['Content-Type'] = 'application/json';
+          requestBody = JSON.stringify(metadataPayload);
+        }
+
         const response = await fetch('/api/download-zip', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            images: images.map((img) => ({
-              url: img.fullUrl,
-              fallbackUrl: img.fallbackUrl,
-              linkedPageUrl: img.linkedPageUrl,
-              filename: img.filename,
-              galleryTitle: img.galleryTitle,
-              galleryId: img.galleryId,
-            })),
-            archiveName: pageTitle,
-            referer: sourceUrl,
-            relayUrl: relayUrl.trim() || undefined,
-            format,
-            onlyFullRes,
-            streamProgress: true,
-          }),
+          headers: requestHeaders,
+          body: requestBody,
           signal: streamController.signal,
         });
 
@@ -509,7 +620,11 @@ export async function downloadCompressedArchiveWithProgress(
             const archiveSha256 =
               response.headers.get('x-archive-sha256') ||
               (await computeSha256Hex(resData.blob).catch(() => undefined));
-            triggerBlobDownload(resData.blob, archiveFilename);
+            if (saveBlobFn) {
+              saveBlobFn(resData.blob, archiveFilename);
+            } else {
+              triggerBlobDownload(resData.blob, archiveFilename);
+            }
             emit({
               stage: 'complete',
               percent: 100,
@@ -678,7 +793,11 @@ export async function downloadCompressedArchiveWithProgress(
           readyPayload.archiveSha256 ||
           fileResp.headers.get('x-archive-sha256') ||
           (await computeSha256Hex(finalBlob).catch(() => undefined));
-        triggerBlobDownload(finalBlob, readyPayload.filename);
+        if (saveBlobFn) {
+          saveBlobFn(finalBlob, readyPayload.filename);
+        } else {
+          triggerBlobDownload(finalBlob, readyPayload.filename);
+        }
         cleanupStagedArchiveToken(readyPayload.token);
         emit({
           stage: 'complete',
@@ -688,6 +807,8 @@ export async function downloadCompressedArchiveWithProgress(
           validImages: readyPayload.fileCount,
           bytesLoaded: finalBlob.size,
           bytesTotal: finalBlob.size,
+          usedBrowserCache: serverReusedCacheCount > 0 ? true : undefined,
+          reusedFromCacheCount: serverReusedCacheCount > 0 ? serverReusedCacheCount : undefined,
           archiveSha256: computedArchiveSha,
           checksumEntries: readyPayload.checksumEntries,
           skippedCount: readyPayload.skippedCount ?? Math.max(0, images.length - readyPayload.fileCount),
@@ -701,6 +822,8 @@ export async function downloadCompressedArchiveWithProgress(
           format: readyPayload.format,
           fileCount: readyPayload.fileCount,
           totalBytes: finalBlob.size,
+          usedBrowserCache: serverReusedCacheCount > 0 ? true : undefined,
+          reusedFromCacheCount: serverReusedCacheCount > 0 ? serverReusedCacheCount : undefined,
           archiveSha256: computedArchiveSha,
           checksumEntries: readyPayload.checksumEntries,
           skippedCount: readyPayload.skippedCount ?? Math.max(0, images.length - readyPayload.fileCount),
